@@ -1502,14 +1502,16 @@ function App(){
     return ()=>clearTimeout(t);
   },[sites,sid,nid,costMap,dataLoaded]);
 
-  // Firestore real-time sync
+  // Firestore real-time sync — 다른 기기에서의 변경 실시간 반영
   useEffect(()=>{
-    if(!_DOC) return;
+    if(!_DOC||!dataLoaded) return;
     const unsub = _DOC.onSnapshot(snap=>{
       if(_isSavingToFirebase) return;
       if(snap.exists){
         const data=snap.data();
         if(data.sites)setSites(data.sites);
+        if(data.sid!=null)setSid(data.sid);
+        if(data.nid!=null)setNid(data.nid);
         if(data.costMap)setCostMap(data.costMap);
       }
     });
@@ -1578,7 +1580,7 @@ function App(){
         <span className="hdr-sub">Construction Manager</span>
       </div>
       <div style={{display:'flex',alignItems:'center',gap:5}}>
-        <span style={{fontSize:9,color:'rgba(255,255,255,.35)'}}>💾 자동저장</span>
+        <span style={{fontSize:9,color:'rgba(255,255,255,.5)'}}>🔄 실시간 동기화</span>
         <button onClick={()=>exportData({sites,sid,nid,costMap})}
           style={{background:'none',border:'1px solid rgba(255,255,255,.25)',borderRadius:4,padding:'3px 9px',fontSize:10,color:'rgba(255,255,255,.75)',cursor:'pointer',fontFamily:'inherit',fontWeight:600}}>⬇ 백업</button>
         <button onClick={()=>importData(data=>{ setSites(data.sites); setSid(data.sid||data.sites[0]?.id||1); setNid(data.nid||100); setCostMap(data.costMap); })}
@@ -1736,7 +1738,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 </script>
 <script>
 window._appLoaded = true;
-// 사용자 선택 비활성화 — 자동 로드
-if(window._onUserSelected) window._onUserSelected();
+// React 마운트 후 확실히 Firestore 로드
+setTimeout(function(){
+  if(window._onUserSelected) window._onUserSelected();
+}, 500);
 </script>
 </body></html>
