@@ -1,0 +1,1742 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EV 충전기 시공관리</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18.2.0/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.26.2/babel.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+<script>
+  const firebaseConfig = {
+    apiKey: "AIzaSyBdwqgG6KIXaO4cmwj0kAukmRJrPCV22GY",
+    authDomain: "simul-sj-bs.firebaseapp.com",
+    projectId: "simul-sj-bs",
+    storageBucket: "simul-sj-bs.firebasestorage.app",
+    messagingSenderId: "899706917405",
+    appId: "1:899706917405:web:87921925b679b1ba942cf4"
+  };
+  firebase.initializeApp(firebaseConfig);
+  const _db = firebase.firestore();
+  const _USERS_DOC = _db.collection('ev_construction').doc('users_list');
+  let _DOC = null;
+  let _currentUser = null;
+
+  // 고정 사용자 (단일 사용자 모드)
+  _DOC = _db.collection('ev_construction').doc('data_default');
+  _currentUser = { id: 'default', name: '시공관리자' };
+
+  async function loadUsers() {
+    try { const snap = await _USERS_DOC.get(); return snap.exists ? (snap.data().users || []) : []; }
+    catch(e) { return []; }
+  }
+  async function saveUsers(users) {
+    try { await _USERS_DOC.set({ users }); } catch(e) { console.error(e); }
+  }
+  function selectUser(user) {
+    _DOC = _db.collection('ev_construction').doc('data_' + user.id);
+    _currentUser = user;
+    localStorage.setItem('constr_user_id', user.id);
+    localStorage.setItem('constr_user_name', user.name);
+    document.getElementById('user-select-overlay').style.display = 'none';
+    if(window._onUserSelected) window._onUserSelected();
+  }
+  async function initUserSelection() {
+    const savedId = localStorage.getItem('constr_user_id');
+    if (savedId) {
+      const users = await loadUsers();
+      const found = users.find(u => u.id === savedId);
+      if (found) {
+        _DOC = _db.collection('ev_construction').doc('data_' + found.id);
+        _currentUser = found;
+        document.getElementById('user-select-overlay').style.display = 'none';
+        if(window._onUserSelected) window._onUserSelected();
+        return;
+      }
+    }
+    document.getElementById('user-select-overlay').style.display = 'flex';
+    const list = document.getElementById('user-modal-list');
+    list.innerHTML = '<div style="text-align:center;padding:15px;color:#999;">불러오는 중...</div>';
+    const users = await loadUsers();
+    list.innerHTML = '';
+    if (users.length === 0) {
+      list.innerHTML = '<div style="text-align:center;padding:15px;color:#999;font-size:12px;">등록된 사용자가 없습니다</div>';
+    } else {
+      users.forEach(u => {
+        const btn = document.createElement('button');
+        btn.className = 'um-user-btn';
+        btn.innerHTML = '<span class="um-avatar">' + (u.name||'?')[0] + '</span><span>' + u.name + '</span>';
+        btn.onclick = () => selectUser(u);
+        list.appendChild(btn);
+      });
+    }
+  }
+  async function addNewUser() {
+    const input = document.getElementById('new-user-name');
+    const name = (input.value || '').trim();
+    if (!name) return;
+    const users = await loadUsers();
+    const id = 'u_' + Date.now();
+    const newUser = { id, name };
+    users.push(newUser);
+    await saveUsers(users);
+    input.value = '';
+    selectUser(newUser);
+  }
+  // Migration: import from old backup
+  async function migrateFromBackup(data) {
+    if(!_DOC) return false;
+    try { await _DOC.set(data); return true; }
+    catch(e) { console.error('Migration failed:', e); return false; }
+  }
+</script>
+<style>
+/* 125% 기본 배율 */
+html { zoom: 1.25; }
+body, #root { height: calc(100vh / 1.25); overflow: hidden; }
+
+:root{
+  --bg:#F4F3F0;--s1:#FFF;--s2:#F9F8F6;--s3:#EEECEA;--bd:#E2E0DC;--bd2:#C8C4BE;
+  --ink:#1A1916;--ink2:#5A5750;--ink3:#9A958E;
+  --acc:#1D4ED8;--accl:#EEF2FF;--accd:rgba(29,78,216,.12);
+  --grn:#15803D;--grnd:#F0FDF4;--grn2:#86EFAC;
+  --red:#B91C1C;--redd:#FEF2F2;--red2:#FCA5A5;
+  --org:#B45309;--orgd:#FFFBEB;--org2:#FDE68A;
+  --r:7px;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:'IBM Plex Sans KR',-apple-system,sans-serif;background:var(--bg);color:var(--ink);font-size:13px;}
+#root{display:flex;flex-direction:column;}
+
+/* 사용자 선택 */
+#user-select-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(26,25,22,.6);z-index:9999;align-items:center;justify-content:center}
+.um-modal{background:#fff;border-radius:12px;padding:24px;width:320px;max-width:90vw;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+.um-title{font-size:16px;font-weight:700;margin-bottom:4px}
+.um-sub{font-size:11px;color:var(--ink3);margin-bottom:16px}
+.um-item{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border:1px solid var(--bd);border-radius:7px;cursor:pointer;margin-bottom:6px;transition:.12s}
+.um-item:hover{background:var(--accl);border-color:var(--acc)}
+.um-name{font-size:13px;font-weight:600}
+.um-arrow{color:var(--ink3);font-size:12px}
+.um-divider{border-top:1px solid var(--bd);margin:12px 0;font-size:10px;color:var(--ink3);text-align:center;position:relative}
+.um-divider span{background:#fff;padding:0 8px;position:relative;top:-1px}
+.um-add-row{display:flex;gap:6px}
+.um-add-row input{flex:1;padding:8px 10px;border:1px solid var(--bd);border-radius:7px;font-size:12px;font-family:inherit}
+.um-add-row input:focus{outline:none;border-color:var(--acc)}
+.um-add-row button{padding:8px 14px;background:var(--acc);color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap}
+#user-label{cursor:pointer;padding:3px 9px;border:1px solid rgba(255,255,255,.25);border-radius:4px;font-size:10px;color:rgba(255,255,255,.85);font-weight:600;font-family:inherit;background:none;position:relative}
+#user-label:hover{border-color:rgba(255,255,255,.5)}
+#user-dropdown{display:none;position:absolute;top:100%;right:0;margin-top:4px;background:#fff;border:1px solid var(--bd);border-radius:7px;box-shadow:0 8px 24px rgba(0,0,0,.15);min-width:160px;z-index:100;overflow:hidden}
+.ud-item{padding:8px 12px;font-size:12px;font-weight:500;cursor:pointer;color:var(--ink)}
+.ud-item:hover{background:var(--s2)}
+.ud-item.active{background:var(--accl);color:var(--acc);font-weight:600}
+.ud-divider{border-top:1px solid var(--bd);margin:2px 0}
+.ud-add{color:var(--acc);font-weight:600}
+.ud-del{color:var(--red);font-weight:600}
+
+.hdr{height:46px;background:var(--ink);display:flex;align-items:center;justify-content:space-between;padding:0 16px;flex-shrink:0;}
+.hdr-logo{font-size:13px;font-weight:600;color:#fff;display:flex;align-items:center;gap:9px;}
+.hdr-sep{width:1px;height:13px;background:rgba(255,255,255,.2);}
+.hdr-sub{font-size:11px;color:rgba(255,255,255,.4);font-weight:300;}
+.hdr-badge{background:rgba(29,78,216,.6);color:#93C5FD;font-size:9px;font-weight:700;padding:2px 7px;border-radius:3px;letter-spacing:.05em;}
+
+.layout{display:flex;flex:1;overflow:hidden;}
+
+.sb{width:420px;background:var(--s1);border-right:2px solid var(--bd);box-shadow:4px 0 12px rgba(0,0,0,.06);display:flex;flex-direction:column;flex-shrink:0;z-index:1;}
+.sb-sec{padding:10px 10px 7px;}
+.sb-label{font-size:14px;font-weight:800;color:var(--ink);letter-spacing:.05em;margin-bottom:7px;}
+.btn-add{width:100%;padding:6px 8px;background:var(--accl);border:1px dashed var(--acc);border-radius:var(--r);color:var(--acc);font-size:11px;font-weight:600;font-family:inherit;cursor:pointer;transition:.15s;}
+.btn-add:hover{background:var(--accd);}
+.sb-list{flex:1;overflow-y:auto;overflow-x:hidden;padding:5px 7px;display:grid;grid-template-columns:1fr 1fr;gap:4px;align-content:start;}
+.sitem{padding:8px 10px;border-radius:var(--r);cursor:pointer;transition:.12s;border:1px solid var(--bd);background:var(--s2);min-height:0;min-width:0;overflow:hidden;}
+.sitem:hover{background:var(--s3,#e8e5e0);border-color:var(--ink3);}
+.sitem.active{background:var(--accl);border-color:var(--acc);box-shadow:0 0 0 1px var(--acc);}
+.sitem-name{font-size:13px;font-weight:600;color:var(--ink);margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.sitem.active .sitem-name{color:var(--acc);}
+.sitem-meta{font-size:11px;color:var(--ink3);}
+.sb-foot{border-top:1px solid var(--bd);padding:9px 10px;display:grid;grid-template-columns:1fr 1fr;gap:5px;}
+.sfstat{background:var(--s2);border-radius:5px;padding:6px 8px;}
+.sfstat .n{font-size:14px;font-weight:700;color:var(--ink);font-family:'IBM Plex Mono',monospace;}
+.sfstat .l{font-size:9px;color:var(--ink3);}
+
+.main{flex:1;overflow:hidden;display:flex;flex-direction:column;background:var(--bg);}
+
+/* TOPBAR */
+.topbar{background:var(--s1);border-bottom:1px solid var(--bd);padding:10px 18px 9px;flex-shrink:0;}
+.topbar-row1{display:flex;align-items:baseline;gap:8px;margin-bottom:4px;flex-wrap:wrap;}
+.site-name{font-size:15px;font-weight:700;}
+.site-loc{font-size:11px;color:var(--ink3);}
+.charger-tags{display:flex;gap:4px;flex-wrap:wrap;margin-left:4px;}
+.ctag{display:inline-flex;align-items:center;padding:1px 7px;border-radius:3px;font-size:10px;font-weight:600;background:var(--accd);color:var(--acc);border:1px solid rgba(29,78,216,.15);}
+.kpi-strip{display:flex;gap:5px;}
+.kpi{background:var(--s2);border:1px solid var(--bd);border-radius:var(--r);padding:9px 11px;flex:1;position:relative;}
+.kpi .kl{font-size:10px;color:var(--ink3);margin-bottom:3px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;}
+.kpi .kv{font-size:17px;font-weight:700;color:var(--ink);font-family:'IBM Plex Mono',monospace;}
+.kpi .ks{font-size:10px;color:var(--ink3);margin-top:2px;}
+.kpi.acc .kv{color:var(--acc);}
+.kpi.grn .kv{color:var(--grn);}
+.kpi.red .kv{color:var(--red);}
+.edit-btn{position:absolute;top:5px;right:5px;background:none;border:1px solid var(--bd);border-radius:3px;padding:1px 5px;font-size:9px;color:var(--ink3);cursor:pointer;font-family:inherit;transition:.12s;}
+.edit-btn:hover{border-color:var(--acc);color:var(--acc);}
+.inline-edit{background:var(--accl);border:1px solid rgba(29,78,216,.25);border-radius:var(--r);padding:9px;margin-top:5px;position:absolute;left:0;right:0;top:100%;z-index:100;box-shadow:0 6px 20px rgba(0,0,0,.12);}
+
+.tabs{display:flex;padding:0 18px;background:var(--s1);border-bottom:1px solid var(--bd);flex-shrink:0;}
+.tab{padding:8px 14px;font-size:11px;font-weight:600;color:var(--ink3);cursor:pointer;border-bottom:2px solid transparent;transition:.12s;font-family:inherit;white-space:nowrap;}
+.tab:hover{color:var(--ink);}
+.tab.active{color:var(--acc);border-bottom-color:var(--acc);}
+
+.content{flex:1;overflow-y:auto;padding:14px 18px 40px;}
+
+.card{background:var(--s1);border:1px solid var(--bd);border-radius:var(--r);padding:13px;}
+.card-title{font-size:11px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:11px;}
+
+.rl{display:flex;justify-content:space-between;align-items:baseline;padding:5px 0;border-bottom:1px solid var(--bd);}
+.rl:last-child{border-bottom:none;}
+.rl-l{font-size:11px;color:var(--ink2);}
+.rl-v{font-size:11px;font-weight:600;font-family:'IBM Plex Mono',monospace;color:var(--ink);}
+.rl-v.red{color:var(--red);}
+.rl-v.grn{color:var(--grn);}
+.rl-v.acc{color:var(--acc);}
+.rl-v.org{color:var(--org);}
+.rl.big .rl-l{font-size:12px;font-weight:600;color:var(--ink);}
+.rl.big .rl-v{font-size:13px;}
+.rl.sub .rl-l{padding-left:10px;font-size:10px;color:var(--ink3);}
+.rl.sub .rl-v{font-size:10px;color:var(--ink3);}
+
+.fgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.fg{display:flex;flex-direction:column;gap:3px;}
+.fg.full{grid-column:1/-1;}
+.fg.triple{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;}
+.flbl{font-size:10px;font-weight:600;color:var(--ink2);}
+.finput,.fsel{background:var(--s2);border:1px solid var(--bd);border-radius:5px;padding:6px 8px;color:var(--ink);font-size:12px;font-family:inherit;outline:none;transition:.12s;width:100%;}
+.finput:focus,.fsel:focus{border-color:var(--acc);background:#fff;}
+input[type="date"]{color-scheme:light;-webkit-text-fill-color:var(--ink);}
+.fhint{font-size:9px;color:var(--ink3);}
+.fauto{background:var(--accl);border:1px solid rgba(29,78,216,.2);border-radius:5px;padding:6px 8px;font-size:11px;font-family:'IBM Plex Mono',monospace;color:var(--acc);font-weight:600;}
+.fauto.zero{background:var(--s2);border-color:var(--bd);color:var(--ink3);}
+
+.btn-p{background:var(--acc);color:#fff;border:none;padding:6px 14px;border-radius:var(--r);font-size:11px;font-weight:600;font-family:inherit;cursor:pointer;transition:.15s;}
+.btn-p:hover{background:#1E40AF;}
+.btn-s{background:var(--s2);color:var(--ink2);border:1px solid var(--bd);padding:6px 14px;border-radius:var(--r);font-size:11px;font-family:inherit;cursor:pointer;}
+.btn-ico{background:none;border:1px solid var(--bd);border-radius:4px;padding:3px 7px;font-size:11px;color:var(--ink3);cursor:pointer;font-family:inherit;transition:.12s;}
+.btn-ico:hover{border-color:var(--red);color:var(--red);}
+
+.tog-wrap{display:flex;gap:3px;}
+.tog{flex:1;padding:5px 2px;text-align:center;font-size:11px;font-weight:600;font-family:inherit;border-radius:5px;cursor:pointer;border:1px solid var(--bd);color:var(--ink2);background:var(--s2);transition:.12s;}
+.tog:hover{border-color:var(--acc);color:var(--acc);}
+.tog.on{background:var(--acc);border-color:var(--acc);color:#fff;}
+.tog.on-grn{background:var(--grn);border-color:var(--grn);color:#fff;}
+.tog.on-org{background:var(--org);border-color:var(--org);color:#fff;}
+
+.chk-row{display:flex;align-items:center;gap:6px;padding:5px 0;cursor:pointer;user-select:none;}
+.chk-box{width:14px;height:14px;border:1.5px solid var(--bd2);border-radius:3px;display:flex;align-items:center;justify-content:center;flex-shrink:0;background:var(--s2);transition:.12s;}
+.chk-box.on{background:var(--acc);border-color:var(--acc);}
+.chk-lbl{font-size:11px;color:var(--ink2);}
+
+/* SIM */
+.sim-layout{display:flex;flex-direction:column;gap:11px;}
+.cpanel{background:var(--s1);border:1px solid var(--bd);border-radius:var(--r);padding:12px;display:grid;grid-template-columns:1fr 0.75fr 1.25fr;gap:10px;align-items:start;}
+.cpanel-section{display:flex;flex-direction:column;gap:10px;}
+.cp-label{font-size:11px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.06em;}
+.cp-row{display:flex;flex-direction:column;gap:3px;}
+.cp-input,.cp-sel{background:var(--s2);border:1px solid var(--bd);border-radius:5px;padding:6px 8px;color:var(--ink);font-size:12px;font-family:inherit;outline:none;transition:.12s;width:100%;}
+.cp-input:focus,.cp-sel:focus{border-color:var(--acc);}
+.cp-hint{font-size:10px;color:var(--ink3);}
+.cp-hint.acc{color:var(--acc);font-weight:600;}
+.cp-hint.org{color:var(--org);font-weight:600;}
+.cp-divider{display:none;}
+.rpanel{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-content:start;}
+.rpanel-verdict{grid-column:1/-1;}
+
+.pbar-row{display:flex;align-items:center;gap:7px;margin-bottom:4px;}
+.pbar-lbl{font-size:9px;color:var(--ink2);width:68px;flex-shrink:0;}
+.pbar-track{flex:1;background:var(--bd);border-radius:3px;height:5px;overflow:hidden;}
+.pbar-fill{height:100%;border-radius:3px;transition:width .4s ease;}
+.pbar-val{font-size:9px;font-family:'IBM Plex Mono',monospace;color:var(--ink2);width:44px;text-align:right;flex-shrink:0;}
+
+.verdict{border-radius:var(--r);padding:10px 12px;display:flex;align-items:flex-start;gap:8px;}
+.verdict.go  {background:var(--grnd);border:1px solid var(--grn2);}
+.verdict.warn{background:var(--orgd);border:1px solid var(--org2);}
+.verdict.stop{background:var(--redd);border:1px solid var(--red2);}
+.verdict-ico{font-size:15px;flex-shrink:0;}
+.verdict-body .vt{font-size:12px;font-weight:700;margin-bottom:2px;}
+.verdict.go .vt{color:var(--grn);}
+.verdict.warn .vt{color:var(--org);}
+.verdict.stop .vt{color:var(--red);}
+.verdict-body .vd{font-size:10px;color:var(--ink2);line-height:1.6;}
+
+/* COST */
+.cost-layout{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.cost-total-box{background:var(--ink);color:#fff;border-radius:var(--r);padding:12px;}
+.ct-label{font-size:9px;color:rgba(255,255,255,.5);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px;}
+.ct-val{font-size:18px;font-weight:700;font-family:'IBM Plex Mono',monospace;}
+.ct-sub{font-size:9px;color:rgba(255,255,255,.4);margin-top:2px;}
+.cost-row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--bd);}
+.cost-row:last-child{border-bottom:none;}
+.cost-row-label{font-size:11px;color:var(--ink2);}
+.cost-row-val{font-size:11px;font-weight:600;font-family:'IBM Plex Mono',monospace;}
+.cost-row-val.grn{color:var(--grn);}
+.cost-row-val.red{color:var(--red);}
+.cost-row-val.org{color:var(--org);}
+.cost-row-val.dim{color:var(--ink3);font-weight:400;}
+
+.charger-item-row{display:grid;grid-template-columns:68px 120px 52px 52px 90px 80px 24px;gap:5px;align-items:center;padding:4px 0;border-bottom:1px solid var(--bd);}
+.charger-item-row:last-of-type{border-bottom:none;}
+.cir-val{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--acc);padding:4px 6px;background:var(--accl);border-radius:4px;text-align:right;}
+
+.vat-breakdown{border:1px solid var(--bd);border-radius:5px;overflow:hidden;margin-top:5px;}
+.vat-row{display:flex;justify-content:space-between;align-items:center;padding:4px 10px;}
+.vat-row .vl{font-size:10px;color:var(--ink3);}
+.vat-row .vv{font-family:'IBM Plex Mono',monospace;font-weight:500;font-size:10px;color:var(--ink);}
+.vat-row.vat-total{border-top:1px solid var(--bd);background:var(--accl);padding:5px 10px;}
+.vat-row.vat-total .vl{font-weight:700;color:var(--ink);font-size:10px;}
+.vat-row.vat-total .vv{font-weight:700;font-size:11px;color:var(--acc);}
+
+.subsidy-row{background:var(--grnd);border:1px solid var(--grn2);border-radius:5px;padding:6px 10px;display:flex;justify-content:space-between;align-items:center;margin-top:6px;}
+
+/* COMPARE */
+.ctable{width:100%;border-collapse:collapse;font-size:11px;}
+.ctable th{padding:6px 9px;text-align:left;font-size:9px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.06em;border-bottom:2px solid var(--bd);background:var(--s2);}
+.ctable td{padding:6px 9px;border-bottom:1px solid var(--bd);color:var(--ink);}
+.ctable tr:last-child td{border-bottom:none;}
+.ctable tr:hover td{background:var(--s2);}
+.ctable td.mono{font-family:'IBM Plex Mono',monospace;}
+.ctable td.red{color:var(--red);font-weight:600;}
+.ctable td.grn{color:var(--grn);font-weight:600;}
+.ctable td.acc{color:var(--acc);font-weight:600;}
+.badge{display:inline-flex;align-items:center;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700;}
+.ba{background:#F3E8FF;color:#6D28D9;}
+.bb{background:#E0F2FE;color:#0369A1;}
+.bc{background:#CCFBF1;color:#0D9488;}
+.bn{background:#FEF3C7;color:#92400E;}
+
+.divider{height:1px;background:var(--bd);margin:9px 0;}
+.no-site{flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;color:var(--ink3);}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);backdrop-filter:blur(3px);z-index:200;display:flex;align-items:center;justify-content:center;}
+.modal{background:var(--s1);border:1px solid var(--bd);border-radius:10px;padding:18px;width:400px;max-width:92vw;max-height:85vh;overflow-y:auto;}
+.modal-title{font-size:13px;font-weight:700;margin-bottom:13px;}
+.modal-btns{display:flex;gap:7px;justify-content:flex-end;margin-top:13px;}
+::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px;}
+
+/* ── PRINT ── */
+@media print {
+  html { zoom: 1 !important; }
+  body, #root { height: auto !important; overflow: visible !important; background: #fff !important; }
+  html, body, #root, .main, .content, .layout { background: #fff !important; }
+  .sb, .hdr, .tabs, .edit-btn, .btn-add, .sb-foot,
+  .btn-p, .btn-s, .btn-ico, .inline-edit { display: none !important; }
+  .layout { display: block !important; }
+  .main { overflow: visible !important; height: auto !important; }
+  .topbar { border-bottom: 1px solid #ccc !important; }
+  .content { overflow: visible !important; height: auto !important; padding: 10px 0 !important; }
+  .print-btn { display: none !important; }
+  .card { break-inside: avoid; }
+  .sim-layout { flex-direction: column !important; }
+  .cpanel { grid-template-columns: 1fr 0.75fr 1.25fr !important; }
+  .rpanel { grid-template-columns: 1fr 1fr !important; }
+
+  /* ── Fix 1: 선택 버튼 배경/글씨색 강제 인쇄 ── */
+  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  .tog.on   { background: var(--acc) !important; color: #fff !important; border-color: var(--acc) !important; }
+  .tog.on-grn { background: var(--grn) !important; color: #fff !important; border-color: var(--grn) !important; }
+  .tog.on-org { background: var(--org) !important; color: #fff !important; border-color: var(--org) !important; }
+
+  /* ── Fix 2: 공사비 탭 2페이지 인쇄 ── */
+  /* 2열 그리드 → 단열 블록 */
+  .cost-layout { display: block !important; }
+  .cost-col-1  { display: block !important; margin-bottom: 0 !important; }
+  /* 공사 시간대&전기공사비 카드 바로 뒤 페이지 구분 */
+  .cost-print-break { display: block !important; break-after: page !important; height: 0 !important; margin: 0 !important; padding: 0 !important; }
+
+  /* 전체탭 인쇄: 각 섹션 페이지 구분 */
+  .print-section { break-before: page; }
+  .print-section:first-child { break-before: auto; }
+  .ctable { font-size: 10px !important; }
+}
+@page { size: auto; margin: 10mm; }
+/* ── MOBILE VIEW ── */
+.mobile-view {
+  zoom: 1 !important;
+}
+.mobile-view body, .mobile-view #root {
+  height: auto !important;
+  overflow: visible !important;
+  min-height: 100vh;
+}
+.mobile-view .layout { flex-direction: column !important; }
+
+/* ── Fix 1: 헤더 1행 고정 ── */
+.mobile-view .hdr { height:42px !important; padding:0 10px !important; flex-wrap:nowrap !important; }
+.mobile-view .hdr-logo { gap:5px !important; flex-shrink:1; min-width:0; overflow:hidden; }
+.mobile-view .hdr-logo > span { font-size:11px !important; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.mobile-view .hdr-sep, .mobile-view .hdr-sub { display:none; }
+.mobile-view .hdr-badge { display:none; }
+.mobile-view .hdr > div:last-child { flex-shrink:0; display:flex; align-items:center; gap:4px; }
+.mobile-view .hdr > div:last-child > span { display:none; } /* 자동저장 텍스트 숨김 */
+.mobile-view .hdr > div:last-child button { padding:3px 7px !important; font-size:9px !important; }
+
+/* ── Fix 2: 사이드바 개선 ── */
+.mobile-view .sb {
+  width: 100% !important;
+  height: auto !important;
+  max-height: none !important;
+  border-right: none !important;
+  border-bottom: 1px solid var(--bd);
+  flex-direction: column !important;
+}
+/* 상단 버튼 영역 - 가로 배치 */
+.mobile-view .sb-sec {
+  padding: 8px 10px 6px !important;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+}
+.mobile-view .sb-sec .sb-label { display:none !important; }
+/* 현장 리스트 - 가로 스크롤 */
+.mobile-view .sb-list {
+  display: flex !important;
+  flex-direction: row !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  padding: 4px 8px 6px !important;
+  gap: 6px !important;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.mobile-view .sb-list::-webkit-scrollbar { display:none; }
+.mobile-view .sitem {
+  min-width: 110px !important;
+  max-width: 140px !important;
+  margin-bottom: 0 !important;
+  flex-shrink: 0 !important;
+  padding: 7px 9px !important;
+}
+.mobile-view .sitem-name { font-size:11px !important; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.mobile-view .sitem-meta { font-size:9px !important; white-space:nowrap; }
+.mobile-view .sb-foot { display:none !important; }
+/* 필터 행 숨김 */
+.mobile-view .sb > div:nth-child(2) { display:none !important; }
+
+.mobile-view .main { overflow: visible !important; height:auto !important; }
+.mobile-view .content { overflow:visible !important; height:auto !important; }
+.mobile-view .kpi-strip { flex-wrap: wrap !important; gap:6px !important; }
+.mobile-view .kpi { flex: 1 1 40% !important; min-width:120px; }
+.mobile-view .kpi .kv { font-size:14px !important; }
+.mobile-view .sim-layout { flex-direction: column !important; }
+.mobile-view .cpanel { grid-template-columns: 1fr !important; }
+.mobile-view .rpanel { grid-template-columns: 1fr !important; }
+.mobile-view .tabs { overflow-x: auto; }
+.mobile-view .tab { padding:8px 10px; font-size:11px; white-space:nowrap; }
+.mobile-view .topbar { padding: 8px 12px 8px !important; }
+.mobile-view .topbar-row1 { flex-wrap: wrap; gap:5px; }
+.mobile-view .charger-tags { flex-wrap:wrap; }
+.mobile-view .sb-sec .btn-add { font-size:10px; padding:5px 7px; }
+
+/* 공사비 탭 모바일 전용 */
+.mobile-view .cost-layout { grid-template-columns: 1fr !important; display:block !important; }
+.mobile-view .cost-col-1 { display:block !important; }
+.mobile-view .fgrid { grid-template-columns: 1fr !important; }
+.mobile-view .fg.full { grid-column: 1 !important; }
+/* 충전기·전기공사비 고정폭 테이블 → 가로 스크롤 */
+.mobile-view .cost-table-scroll { overflow-x: auto !important; -webkit-overflow-scrolling: touch; }
+.mobile-view .cost-table-scroll > div { min-width: 480px; }
+/* 스탠드폴&캐노피, 시간대&전기공사비 합성 카드 → 세로 스택 */
+.mobile-view .cost-pair-grid { grid-template-columns: 1fr !important; }
+/* vat-breakdown 모바일 */
+.mobile-view .vat-row .vv { font-size:9px !important; }
+/* 수전방식 버튼 줄바꿈 허용 */
+.mobile-view .tog-wrap { flex-wrap: wrap !important; }
+
+/* ── Fix 4: 공사비 상세 보조금 내역 가로 스크롤 ── */
+.mobile-view .cost-detail-scroll { overflow-x: auto !important; -webkit-overflow-scrolling: touch; }
+.mobile-view .cost-detail-scroll > div { min-width: 520px !important; }
+/* 보조금 산정 텍스트 박스 줄바꿈 허용 */
+.mobile-view .subsidy-calc-box { word-break: keep-all; line-height: 1.9 !important; }
+.mobile-view .subsidy-calc-box div { display:flex; flex-wrap:wrap; gap:2px; align-items:baseline; }
+
+/* ── Fix 5: 전체 비교 탭 테이블 최적화 ── */
+.mobile-view .ctable { font-size:10px !important; }
+.mobile-view .ctable th { padding:5px 6px !important; font-size:8px !important; white-space:nowrap; }
+.mobile-view .ctable td { padding:5px 6px !important; white-space:nowrap; }
+.mobile-view .compare-scroll { overflow-x: auto !important; -webkit-overflow-scrolling: touch; }
+.mobile-view .compare-scroll table { min-width: 560px !important; }
+/* 비교탭 헤더 정보 줄바꿈 방지 */
+.mobile-view .compare-header-row { flex-wrap: wrap !important; gap:4px !important; }
+.mobile-view .compare-header-row span { font-size:10px !important; }
+
+/* ── Fix 6: 현장 정보 탭 우측 정렬 ── */
+.rl-v { text-align: right !important; }
+.mobile-view .info-grid { grid-template-columns: 1fr !important; }
+.mobile-view .rl { flex-wrap:nowrap !important; gap:8px; }
+.mobile-view .rl-l { flex:1; min-width:0; }
+.mobile-view .rl-v { flex-shrink:0; max-width:55%; word-break:break-word; }
+
+/* 시공관리 전용 스타일 */
+.install-loc { background:var(--s2); border:1px solid var(--bd); border-radius:6px; padding:7px 8px; margin-bottom:5px; }
+.install-loc-hdr { display:flex; align-items:center; justify-content:space-between; margin-bottom:4px; }
+.install-loc-name { font-size:10px; font-weight:600; color:var(--ink); flex:1; }
+.install-loc-del { background:none; border:none; cursor:pointer; font-size:14px; color:var(--red); padding:0 4px; }
+.addr-input { width:100%; padding:5px 7px; font-size:10px; border:1px solid var(--bd); border-radius:4px; background:var(--s2); color:var(--ink); font-family:inherit; outline:none; box-sizing:border-box; }
+</style>
+</head>
+<body>
+<!-- 사용자 선택 제거됨 -->
+<div id="root"></div>
+
+<script type="text/babel">
+const {useState,useEffect,useMemo,useRef,useCallback}=React;
+
+/* ─── Constants ─── */
+const SAFETY_T={
+  general: {label:'일반', base:44000, perKw:1059},
+  perform: {label:'공연장/영화상영관', base:109000, perKw:922},
+  hospital:{label:'종합병원/호텔/카지노/국제회의', base:145000, perKw:971},
+  mall:    {label:'대형마트/백화점/쇼핑센터', base:164000, perKw:1045},
+};
+const CHARGER_MODELS={
+  100:['HEV-Q2100','HEV-Q1100'],
+  50: ['HEV-Q2050','HEV-Q1050'],
+  7:  ['HEV-S1007A','HEV-S1007/HE7','HEV-S1007/HEU7','HEV-S21007','HEV-Q1050','HEV-Q1100','HEV-Q2050','HEV-Q2100'],
+  3.5:['HEV','Costel','기타'],
+};
+const CHARGER_KW=[100,50,7,3.5];
+const REGIONS=['서울','인천광역시','경기도','충청북도','충청남도','강원도','경상북도','경상남도','전라북도','전라남도','제주도'];
+const LS_KEY='ev_construction_mgr';
+const SITES0=[{id:1,name:'새 현장',address:'',region:'서울',aboveGround:0,underground:0}];
+const COST0={
+  contractKW:0,buildingType:'general',powerSupplyType:'신규수전(지중)',
+  powerPoints:null, workTime:'주간',
+  includeInsp:false, includeSafety:true, includeKepco:true, includeSupv:true,
+  includeElecMgr:true, includeInspection:true, includeInsurance:true,
+  elecMgrFee:0, inspectionCount:1,
+  subsidyApplied:false,
+  buildingInvestment:false, buildingFundAmount:0, buildingMarginRate:15,
+  chargerItems:[{id:1,kw:7,model:'HEV-S1007A',location:'옥내',qty:0,unitPrice:0}],
+  standQty:0,standUnitPrice:0,
+  canopyQty:0,canopyUnitPrice:0,
+  elecItems:[],
+  installLocations:[], // 세부설치위치
+};
+const POWER_POINT_0=(n)=>({id:Date.now()+n, label:`거점 ${n}`, contractKW:0, powerSupplyType:'신규수전(지중)', includeInsp:false, includeSafety:true, installLocations:[]});
+
+/* ─── Fee calculators ─── */
+const calcInsp   = kw => kw>0 ? Math.floor((94000+kw*391)/10)*10 : 0;
+const calcSafety = (kw,t) => { if(!kw)return 0; const d=SAFETY_T[t]||SAFETY_T.general; return Math.floor((d.base+kw*d.perKw)/10)*10; };
+const calcKepco  = (kw,sup) => {
+  if(!kw)return 0;
+  if(sup==='모자분리')return 0;
+  if(sup==='신규수전(지중)')return kw<=5?588000:588000+(kw-5)*141000;
+  return kw<=5?306000:306000+(kw-5)*121000;
+};
+const calcSupv   = kw => { if(!kw)return 0; if(kw<=130)return 800000; if(kw<=160)return 900000; if(kw<=200)return 1000000; if(kw<=300)return 1100000; if(kw<=400)return 1200000; return 1300000; };
+function calcSubsidyMax(qty){ if(qty<=0)return 0; if(qty===1)return 220; const q1=1,q2=Math.min(qty,5)-1,q3=Math.max(qty-5,0); return q1*220+q2*200+q3*180; }
+function calcSubsidy(subsidyBaseEx,qty){ if(!qty||!subsidyBaseEx)return 0; const half=Math.round(subsidyBaseEx/10000*0.5*10)/10; return Math.min(half,calcSubsidyMax(qty)); }
+const calcInsurance = total => total<=0?0:total<=6?20000:total*3208;
+function calcInspection(chargerItems){
+  if(!chargerItems||chargerItems.length===0)return 0;
+  const slow=chargerItems.filter(i=>parseFloat(i.kw)<=7).reduce((s,i)=>s+(i.qty||0),0);
+  const fast100=chargerItems.filter(i=>parseFloat(i.kw)>7&&parseFloat(i.kw)<=100).reduce((s,i)=>s+(i.qty||0),0);
+  const fast400=chargerItems.filter(i=>parseFloat(i.kw)>100&&parseFloat(i.kw)<=400).reduce((s,i)=>s+(i.qty||0),0);
+  const fast400p=chargerItems.filter(i=>parseFloat(i.kw)>400).reduce((s,i)=>s+(i.qty||0),0);
+  const hasFast=fast100+fast400+fast400p>0;
+  const base=hasFast?170000:(slow>0?43000:0);
+  return base+fast100*46000+fast400*55400+fast400p*62500+slow*7700;
+}
+const toMan = v => Math.round((parseFloat(v)||0)/10000);
+
+const fW = v => {
+  if(v==null||isNaN(parseFloat(v)))return'-';
+  const f=parseFloat(v),sign=f<0?'-':'',abs=Math.abs(Math.round(f));
+  if(abs>=10000){const uk=Math.floor(abs/10000),man=abs%10000; return sign+(man>0?uk+'억 '+man.toLocaleString()+'만원':uk+'억원');}
+  return sign+abs.toLocaleString()+'만원';
+};
+const fWon = v => { if(!v&&v!==0)return'-'; return Math.round(Math.abs(v)).toLocaleString()+'원'; };
+function mergePowerPoints(pts){ return (pts||[]).reduce((s,p)=>s+(parseFloat(p.contractKW)||0),0); }
+
+function calcCostTotals(cd) {
+  const pts = cd.powerPoints && cd.powerPoints.length>0 ? cd.powerPoints : null;
+  const kw = pts ? mergePowerPoints(pts) : (parseFloat(cd.contractKW)||0);
+  const inspEx_pts  = pts ? pts.filter(p=>p.includeInsp!==false).reduce((s,p)=>s+calcInsp(parseFloat(p.contractKW)||0),0) : 0;
+  const safetyEx_pts= pts ? pts.filter(p=>p.includeSafety!==false).reduce((s,p)=>s+calcSafety(parseFloat(p.contractKW)||0,cd.buildingType),0) : 0;
+  const kepcoEx_pts = pts ? pts.reduce((s,p)=>s+calcKepco(parseFloat(p.contractKW)||0,p.powerSupplyType||'신규수전(지중)'),0) : 0;
+  const totalChargers=(cd.chargerItems||[]).reduce((s,i)=>s+(i.qty||0),0);
+  const chargerExVAT=(cd.chargerItems||[]).reduce((s,i)=>s+(i.qty||0)*(i.unitPrice||0),0);
+  const standExVAT=(cd.standQty||0)*(cd.standUnitPrice||0);
+  const canopyExVAT=(cd.canopyQty||0)*(cd.canopyUnitPrice||0);
+  const elecExVAT=(cd.elecItems||[]).reduce((s,i)=>s+(parseFloat(i.qty)||0)*(parseFloat(i.unitPrice)||0),0);
+  const inspEx      = cd.includeInsp   ? (pts ? inspEx_pts   : calcInsp(kw)) : 0;
+  const safetyEx    = cd.includeSafety ? (pts ? safetyEx_pts : calcSafety(kw,cd.buildingType)) : 0;
+  const kepcoEx     = pts ? kepcoEx_pts : calcKepco(kw,cd.powerSupplyType);
+  const supervEx    = cd.includeSupv   ? calcSupv(kw) : 0;
+  const elecMgrEx   = cd.includeElecMgr ? (parseFloat(cd.elecMgrFee)||0) : 0;
+  const inspCnt=cd.inspectionCount||1;
+  const inspectionInc=cd.includeInspection?calcInspection(cd.chargerItems)*inspCnt:0;
+  const inspectionEx =Math.round(inspectionInc/1.1);
+  const insuranceInc =cd.includeInsurance ?calcInsurance(totalChargers):0;
+  const insuranceEx  =insuranceInc;
+  const legalCostEx=inspEx+safetyEx+kepcoEx+supervEx;
+  const legalEx=legalCostEx+elecMgrEx+inspectionEx+insuranceEx;
+  const totalBEx=chargerExVAT+standExVAT+elecExVAT+legalCostEx;
+  const totalBVT=Math.round(totalBEx*.1);
+  const totalBIn=totalBEx+totalBVT;
+  const totalCEx=chargerExVAT+standExVAT+canopyExVAT+elecExVAT+legalCostEx;
+  const totalCVT=Math.round(totalCEx*.1);
+  const totalCIn=totalCEx+totalCVT;
+  const subsidyBaseEx=chargerExVAT+standExVAT+canopyExVAT+elecExVAT+kepcoEx;
+  const subsidyChargerEx=Math.round(chargerExVAT/2);
+  const subsidyStandEx=Math.round(standExVAT/2);
+  const subsidyCanopyEx=Math.round(canopyExVAT/2);
+  const subsidyElecEx=Math.round(elecExVAT/2);
+  const subsidyKepcoEx=Math.round(kepcoEx/2);
+  const subsidyAmt=cd.subsidyApplied?Math.round(calcSubsidy(subsidyBaseEx,totalChargers)*10000):0;
+  const subsidyC=subsidyAmt;
+  const netCWon=totalCIn+inspectionInc+insuranceInc+(parseFloat(cd.elecMgrFee)||0)*inspCnt-subsidyC;
+  return {
+    chargerExVAT,standExVAT,canopyExVAT,elecExVAT,legalEx,legalCostEx,
+    inspEx,safetyEx,kepcoEx,supervEx,elecMgrEx,inspectionEx,insuranceEx,
+    inspectionInc,insuranceInc,totalChargers,inspCnt,
+    totalBEx,totalBVT,totalBIn,totalCEx,totalCVT,totalCIn,
+    subsidyBaseEx,subsidyChargerEx,subsidyStandEx,subsidyCanopyEx,subsidyElecEx,subsidyKepcoEx,
+    subsidyAmt,subsidyC,netCWon,
+    totalBMan:toMan(totalBIn),totalCMan:toMan(totalCIn),netCMan:toMan(netCWon),
+  };
+}
+
+/* ─── Data Persistence ─── */
+let _isSavingToFirebase = false;
+async function loadLS(){
+  try{
+    if(!_DOC) return null;
+    const snap = await _DOC.get();
+    if(snap.exists){
+      const data = snap.data();
+      try{ localStorage.setItem(LS_KEY, JSON.stringify(data)); }catch(e){}
+      return data;
+    }
+  }catch(e){ console.warn('Firebase 로드 실패:', e); }
+  try{ const d=localStorage.getItem(LS_KEY); return d?JSON.parse(d):null; }catch(e){ return null; }
+}
+async function saveLS(d){
+  try{ localStorage.setItem(LS_KEY,JSON.stringify(d)); }catch(e){}
+  if(!_DOC) return;
+  try{
+    _isSavingToFirebase = true;
+    await _DOC.set(d);
+    setTimeout(()=>{ _isSavingToFirebase = false; }, 2500);
+  }catch(e){ _isSavingToFirebase = false; console.warn('Firebase 저장 실패:', e); }
+}
+function exportData(data){
+  const json=JSON.stringify(data,null,2);
+  const blob=new Blob([json],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download='ev_construction_'+new Date().toISOString().slice(0,10)+'.json';
+  a.click(); URL.revokeObjectURL(url);
+}
+function importData(onSuccess){
+  const inp=document.createElement('input'); inp.type='file'; inp.accept='.json';
+  inp.onchange=e=>{
+    const file=e.target.files[0]; if(!file)return;
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      try{
+        const data=JSON.parse(ev.target.result);
+        if(data.sites&&data.costMap){
+          // Support importing from old simulation backup
+          if(!data.sites[0].hasOwnProperty('address')){
+            data.sites = data.sites.map(s=>({...s, address:s.location||'', location:undefined}));
+          }
+          onSuccess(data);
+        } else { alert('올바른 백업 파일이 아닙니다.'); }
+      }catch(err){ alert('파일 파싱 오류: '+err.message); }
+    };
+    reader.readAsText(file);
+  };
+  inp.click();
+}
+
+/* ─── Migration Data (from original backup) ─── */
+const MIGRATION_DATA = {"sites": [{"id": 1, "name": "서초힐스", "address": "서울 서초구", "region": "서울", "aboveGround": 5, "underground": 13}, {"id": 10, "name": "수림1차아파트 2안_철거A", "address": "경기도 이천시 증신로291번길 105", "region": "경기도", "aboveGround": 0, "underground": 9}, {"id": 11, "name": "수림1차아파트 2안_철거C", "address": "경기도 이천시 증신로291번길 105", "region": "경기도", "aboveGround": 0, "underground": 9}, {"id": 14, "name": "SK허브진(2안_2열)_1안은 20만원저렴", "address": "서울 강동구 천호대로 1092", "region": "서울", "aboveGround": 5, "underground": 0}, {"id": 15, "name": "반포래미안아이파크", "address": "서울특별시 서초구 서초중앙로 220", "region": "서울", "aboveGround": 0, "underground": 21}, {"id": 16, "name": "효양아파트", "address": "경기도 이천시 부발읍 부발중앙로46번길 46", "region": "경기도", "aboveGround": 7, "underground": 0}, {"id": 17, "name": "일성아파트", "address": "경기도 이천시 애련정로 41", "region": "경기도", "aboveGround": 0, "underground": 4}, {"id": 18, "name": "대림휴먼빌", "address": "경기 이천시 이섭대천로1407번길 20", "region": "경기도", "aboveGround": 4, "underground": 4}, {"id": 19, "name": "이천증포대원칸타빌", "address": "경기도 이천시 아리역로76번길 19", "region": "경기도", "aboveGround": 0, "underground": 4}, {"id": 20, "name": "여주하리현대", "address": "경기도 여주시 청심로 79", "region": "경기도", "aboveGround": 0, "underground": 2}, {"id": 21, "name": "금강아파트 (용인 처인구)", "address": "경기도 용인시 처인구 명지로 15-29", "region": "경기도", "aboveGround": 0, "underground": 4}, {"id": 22, "name": "논현동 역세권 청년주택", "address": "서울특별시 강남구 봉은사로 125", "region": "서울", "aboveGround": 0, "underground": 3}, {"id": 23, "name": "엘지빌리지1차", "address": "경기 용인시 수지구 성복2로 86", "region": "경기도", "aboveGround": 0, "underground": 33}, {"id": 24, "name": "다산중앙공원", "address": "경기도 남양주시 다산동 6271-5~6 일대", "region": "경기도", "aboveGround": 2, "underground": 0}, {"id": 25, "name": "대륭테크노타운20차", "address": "서울시 금천구 가산동", "region": "서울", "aboveGround": 10, "underground": 0}, {"id": 27, "name": "연수효정아파트", "address": "인천광역시 연수구", "region": "경기도", "aboveGround": 7, "underground": 0}, {"id": 28, "name": "춘천석사아파트2지구 (신규설치)", "address": "강원도 춘천시", "region": "강원도", "aboveGround": 2, "underground": 0}, {"id": 29, "name": "춘천석사아파트2지구 (교체)", "address": "강원도 춘천시", "region": "강원도", "aboveGround": 2, "underground": 0}, {"id": 30, "name": "송도더프라우3단지", "address": "인천광역시 연수구", "region": "경기도", "aboveGround": 0, "underground": 6}, {"id": 31, "name": "사동6차현대아파트(이설또는 별도회로포설)", "address": "경기도 이천시", "region": "경기도", "aboveGround": 7, "underground": 0}, {"id": 32, "name": "청솔아파트 7kW 3기 신규", "address": "서울시 노원구", "region": "서울", "aboveGround": 0, "underground": 3}, {"id": 33, "name": "경인교대_인천캠퍼스 (1기이설)", "address": "인천 계양구", "region": "서울", "aboveGround": 1, "underground": 0}, {"id": 34, "name": "뉴서울산곡1차아파트_2기 이설", "address": "인천 부평구", "region": "경기도", "aboveGround": 2, "underground": 0}, {"id": 35, "name": "청라서해그랑블", "address": "인천광역시 서구", "region": "경기도", "aboveGround": 0, "underground": 11}, {"id": 36, "name": "대신푸른마을아파트 (3기 교체 및 2도도색)", "address": "경기도 이천시 신둔면 이여로 101번길 101-4", "region": "경기도", "aboveGround": 3, "underground": 0}, {"id": 37, "name": "여주점봉부영아파트 (5기 교체)", "address": "경기도 여주시 세종로 394-10", "region": "경기도", "aboveGround": 0, "underground": 5}, {"id": 38, "name": "거평아파트(2기교체)", "address": "경기도 이천시 부발읍 경충대로 2227 ", "region": "경기도", "aboveGround": 2, "underground": 0}, {"id": 39, "name": "관문제2체육공원", "address": "경기도 과천시", "region": "경기도", "aboveGround": 3, "underground": 0}, {"id": 40, "name": "양양e편한세상 - 1안 (3기)", "address": "강원도 양양군 양양읍 한고개길 17-18", "region": "강원도", "aboveGround": 3, "underground": 0}, {"id": 41, "name": "양양e편한세상 - 2안 (7기)", "address": "강원도 양양군 양양읍 한고개길 17-18", "region": "강원도", "aboveGround": 3, "underground": 0}, {"id": 42, "name": "동해 상하수도사업소", "address": "강원도 동해시 새골길 50", "region": "강원도", "aboveGround": 3, "underground": 0}], "sid": 41, "nid": 43, "costMap": {"1": {"buildingType": "general", "canopyQty": 0, "chargerItems": [{"unitPrice": 0, "qty": 13, "kw": 7, "model": "HEV-S1007A", "id": 1, "location": "옥내"}, {"id": 2, "location": "옥외", "model": "HEV-S1007A", "kw": 7, "unitPrice": 0, "qty": 5}], "contractKW": 0, "standQty": 0, "includeSupv": true, "standUnitPrice": 0, "subsidyApplied": false, "includeSafety": true, "powerPoints": [{"powerSupplyType": "신규수전(지중)", "id": 1776245591709, "contractKW": 0, "label": "거점 1", "includeSafety": true, "includeInsp": true}], "includeKepco": true, "canopyUnitPrice": 0, "workTime": "주간", "powerSupplyType": "신규수전(지중)", "includeInsp": true, "elecItems": []}, "10": {"includeSupv": false, "inspectionCount": 1, "subsidyApplied": true, "standUnitPrice": 135000, "standQty": 5, "elecMgrFee": 100000, "chargerItems": [{"model": "HEV-S21007", "qty": 5, "kw": 7, "unitPrice": 650000, "id": 1, "location": "옥외"}], "contractKW": 35, "canopyQty": 0, "buildingType": "general", "elecItems": [{"name": "전기공사", "id": 200, "unitPrice": 16172727, "qty": "1", "unit": "식"}], "includeInsurance": false, "includeInsp": false, "includeElecMgr": false, "includeKepco": false, "powerSupplyType": "모자분리", "canopyUnitPrice": 0, "workTime": "주간", "includeSafety": true, "includeInspection": false}, "11": {"includeElecMgr": false, "includeInsp": false, "includeInsurance": false, "elecItems": [{"name": "전기공사", "id": 200, "unitPrice": 19760000, "qty": "1", "unit": "식"}], "includeInspection": false, "includeSafety": true, "powerSupplyType": "모자분리", "canopyUnitPrice": 0, "workTime": "주간", "includeKepco": false, "standQty": 5, "subsidyApplied": true, "standUnitPrice": 135000, "includeSupv": false, "canopyQty": 0, "buildingType": "general", "contractKW": 35, "chargerItems": [{"id": 1, "location": "옥외", "kw": 7, "qty": 5, "unitPrice": 650000, "model": "HEV-S1007A"}]}, "14": {"elecItems": [{"id": 201, "name": "전기공사", "unit": "식", "unitPrice": 6954545, "qty": "1"}, {"id": 202, "name": "소화기", "unit": "식", "qty": "1", "unitPrice": 150000}], "includeInsurance": false, "includeInsp": false, "includeElecMgr": false, "includeKepco": false, "workTime": "주간", "canopyUnitPrice": 0, "powerSupplyType": "모자분리", "includeSafety": true, "includeInspection": false, "includeSupv": false, "standUnitPrice": 135000, "subsidyApplied": true, "inspectionCount": 1, "standQty": 5, "elecMgrFee": 0, "chargerItems": [{"model": "HEV-S21007", "kw": 7, "unitPrice": 650000, "qty": 5, "id": 1, "location": "옥외"}], "contractKW": 35, "canopyQty": 0, "buildingType": "general"}, "15": {"powerSupplyType": "모자분리", "workTime": "주간", "canopyUnitPrice": 0, "includeKepco": false, "includeInspection": true, "includeSafety": true, "includeInsurance": true, "elecItems": [{"unit": "식", "qty": "1", "unitPrice": 1500000, "id": 200, "name": "1기 추가설치"}, {"unit": "식", "qty": "1", "unitPrice": 4118000, "id": 201, "name": "21기 교체 및 본딩접지"}], "includeElecMgr": false, "includeInsp": false, "contractKW": 154, "chargerItems": [{"location": "옥내", "id": 1, "model": "HEV-S21007", "qty": 22, "kw": 7, "unitPrice": 650000}], "buildingType": "general", "canopyQty": 0, "subsidyApplied": false, "inspectionCount": 3, "standUnitPrice": 0, "includeSupv": false, "elecMgrFee": 0, "standQty": 0}, "16": {"includeKepco": false, "canopyUnitPrice": 0, "workTime": "주간", "powerSupplyType": "모자분리", "includeSafety": true, "includeInspection": false, "elecItems": [{"unit": "식", "unitPrice": 1000000, "qty": "1", "id": 201, "name": "교체공사"}, {"qty": "1", "unitPrice": 200000, "unit": "식", "name": "보완공사", "id": 202}], "includeInsurance": false, "includeInsp": false, "includeElecMgr": false, "chargerItems": [{"location": "옥내", "id": 1, "kw": 7, "qty": 7, "unitPrice": 650000, "model": "HEV-S1007A"}], "contractKW": 49, "canopyQty": 0, "buildingType": "general", "includeSupv": false, "standUnitPrice": 0, "inspectionCount": 1, "subsidyApplied": false, "elecMgrFee": 0, "standQty": 0}, "17": {"subsidyApplied": true, "inspectionCount": 1, "standUnitPrice": 0, "includeSupv": true, "standQty": 0, "elecMgrFee": 0, "contractKW": 28, "chargerItems": [{"qty": 4, "unitPrice": 650000, "kw": 7, "model": "HEV-S21007", "location": "옥내", "id": 1}], "buildingType": "general", "canopyQty": 0, "includeInsurance": true, "elecItems": [{"id": 203, "name": "교체공사", "unit": "식", "unitPrice": 600000, "qty": "1"}], "includeElecMgr": true, "includeInsp": true, "powerSupplyType": "신규수전(지중)", "workTime": "주간", "canopyUnitPrice": 0, "includeKepco": true, "includeInspection": true, "includeSafety": true}, "18": {"includeInspection": false, "includeSafety": true, "powerSupplyType": "신규수전(지중)", "canopyUnitPrice": 0, "workTime": "주간", "includeKepco": true, "powerPoints": [{"includeInsp": false, "includeSafety": false, "label": "거점 1", "contractKW": 28, "id": 1776259793697, "powerSupplyType": "신규수전(가공)"}], "buildingFundAmount": 5000000, "includeElecMgr": true, "includeInsp": true, "includeInsurance": false, "elecItems": [{"unit": "식", "unitPrice": 1000000, "qty": "1", "id": 200, "name": "시공비"}], "buildingType": "general", "canopyQty": 0, "contractKW": 28, "chargerItems": [{"model": "HEV-S21007", "qty": 4, "kw": 7, "unitPrice": 0, "location": "옥내", "id": 1}], "elecMgrFee": 0, "standQty": 0, "subsidyApplied": false, "inspectionCount": 1, "standUnitPrice": 0, "includeSupv": false, "buildingInvestment": true}, "19": {"includeSafety": true, "includeInspection": true, "powerPoints": [{"includeInsp": false, "includeSafety": true, "contractKW": 28, "id": 1776677434031, "powerSupplyType": "모자분리", "label": "거점 1"}], "includeKepco": true, "canopyUnitPrice": 0, "workTime": "주간", "powerSupplyType": "신규수전(지중)", "includeInsp": true, "includeElecMgr": true, "elecItems": [{"name": "교체철거공사", "id": 200, "unitPrice": 720000, "qty": "1", "unit": "식"}], "includeInsurance": true, "buildingType": "general", "canopyQty": 0, "chargerItems": [{"model": "HEV-S21007", "kw": 7, "unitPrice": 650000, "qty": 4, "id": 2, "location": "옥내"}], "contractKW": 28, "elecMgrFee": 0, "standQty": 0, "includeSupv": false, "standUnitPrice": 0, "inspectionCount": 1, "subsidyApplied": false}, "20": {"includeKepco": true, "powerPoints": [{"includeInsp": false, "includeSafety": true, "contractKW": 35, "id": 1777364465457, "powerSupplyType": "신규수전(가공)", "label": "거점 1"}], "powerSupplyType": "신규수전(지중)", "canopyUnitPrice": 0, "workTime": "주간", "includeSafety": false, "includeInspection": true, "elecItems": [{"qty": "1", "unitPrice": 7000000, "unit": "식", "name": "공사비", "id": 200}], "includeInsurance": true, "includeInsp": false, "includeElecMgr": false, "chargerItems": [{"location": "옥외", "id": 1, "model": "HEV-S21007", "unitPrice": 650000, "qty": 5, "kw": 7}], "contractKW": 35, "canopyQty": 0, "buildingType": "general", "includeSupv": false, "subsidyApplied": true, "inspectionCount": 1, "standUnitPrice": 135000, "elecMgrFee": 0, "standQty": 5}, "21": {"buildingType": "general", "canopyQty": 0, "buildingMarginRate": 0, "chargerItems": [{"location": "옥외", "id": 1, "model": "HEV-S21007", "unitPrice": 650000, "kw": 7, "qty": 1}], "contractKW": 7, "standQty": 1, "elecMgrFee": 0, "includeSupv": false, "buildingInvestment": false, "subsidyApplied": false, "inspectionCount": 1, "standUnitPrice": 135000, "includeSafety": true, "includeInspection": true, "includeKepco": true, "powerPoints": [{"includeInsp": false, "includeSafety": false, "label": "거점 1", "powerSupplyType": "신규수전(가공)", "contractKW": 7, "id": 1777368072157}], "powerSupplyType": "신규수전(지중)", "workTime": "주간", "canopyUnitPrice": 0, "includeInsp": true, "buildingFundAmount": 0, "includeElecMgr": false, "elecItems": [{"name": "신규설치공사", "id": 200, "unitPrice": 1945455, "qty": "1", "unit": "식"}, {"qty": "1", "unitPrice": 545455, "unit": "식", "name": "기존충전기 철거 4기", "id": 201}], "includeInsurance": true}, "22": {"canopyQty": 0, "buildingType": "general", "contractKW": 21, "chargerItems": [{"model": "HEV-S21007", "kw": 7, "unitPrice": 650000, "qty": 3, "id": 1, "location": "옥내"}], "standQty": 0, "elecMgrFee": 0, "standUnitPrice": 0, "subsidyApplied": true, "inspectionCount": 1, "buildingInvestment": false, "includeSupv": false, "includeInspection": true, "includeSafety": true, "workTime": "주간", "canopyUnitPrice": 0, "powerSupplyType": "신규수전(지중)", "powerPoints": [{"includeSafety": true, "includeInsp": false, "label": "거점 1", "id": 1777374903997, "contractKW": 21, "powerSupplyType": "모자분리"}], "includeKepco": false, "includeElecMgr": false, "includeInsp": false, "includeInsurance": true, "elecItems": [{"unit": "식", "unitPrice": 409091, "qty": "1", "id": 200, "name": "철거비"}, {"id": 201, "name": "설치비", "unit": "식", "unitPrice": 3772727, "qty": "1"}]}, "23": {"elecMgrFee": 0, "standQty": 0, "standUnitPrice": 0, "subsidyApplied": false, "inspectionCount": 1, "includeSupv": false, "buildingInvestment": false, "canopyQty": 0, "buildingType": "general", "contractKW": 231, "chargerItems": [{"model": "HEV-S21007", "qty": 33, "unitPrice": 650000, "kw": 7, "location": "옥내", "id": 1}], "buildingMarginRate": 15, "buildingFundAmount": 0, "includeElecMgr": false, "includeInsp": false, "includeInsurance": true, "elecItems": [{"id": 200, "name": "전기공사", "unit": "식", "unitPrice": 3300000, "qty": "1"}, {"unitPrice": 1500000, "qty": "1", "unit": "식", "name": "소화기", "id": 201}], "includeInspection": true, "includeSafety": true, "canopyUnitPrice": 0, "workTime": "주간", "powerSupplyType": "신규수전(지중)", "powerPoints": [{"powerSupplyType": "모자분리", "contractKW": 231, "id": 1778064503309, "label": "거점 1", "includeSafety": true, "includeInsp": false}], "includeKepco": false}, "24": {"standQty": 2, "elecMgrFee": 0, "standUnitPrice": 135000, "inspectionCount": 1, "subsidyApplied": true, "buildingInvestment": false, "includeSupv": false, "buildingType": "general", "canopyQty": 0, "contractKW": 14, "chargerItems": [{"model": "HEV-S21007", "qty": 2, "unitPrice": 650000, "kw": 7, "location": "옥외", "id": 1}], "buildingMarginRate": 15, "buildingFundAmount": 0, "includeElecMgr": false, "includeInsp": false, "includeInsurance": true, "elecItems": [{"id": 200, "name": "전기공사", "unit": "식", "unitPrice": 3320000, "qty": "1"}], "includeInspection": true, "includeSafety": true, "workTime": "주간", "canopyUnitPrice": 0, "powerSupplyType": "신규수전(지중)", "powerPoints": [{"includeSafety": true, "includeInsp": false, "contractKW": 14, "id": 1779270222022, "powerSupplyType": "신규수전(지중)", "label": "거점 1"}], "includeKepco": true}, "25": {"workTime": "주간", "canopyUnitPrice": 0, "powerSupplyType": "신규수전(지중)", "powerPoints": [{"includeInsp": false, "includeSafety": true, "label": "거점 1", "id": 1780307922699, "contractKW": 35, "powerSupplyType": "모자분리"}], "includeKepco": false, "includeInspection": true, "includeSafety": true, "includeInsurance": true, "elecItems": [{"id": 200, "name": "철거공사", "unit": "식", "qty": "1", "unitPrice": 2645455}, {"qty": "1", "unitPrice": 16463636, "unit": "식", "name": "신규설치비", "id": 201}], "buildingFundAmount": 0, "includeElecMgr": false, "includeInsp": false, "contractKW": 35, "chargerItems": [{"id": 1, "location": "옥내", "qty": 5, "kw": 7, "unitPrice": 650000, "model": "HEV-S21007"}], "buildingMarginRate": 15, "buildingType": "general", "canopyQty": 0, "standUnitPrice": 135000, "subsidyApplied": true, "inspectionCount": 1, "includeSupv": false, "buildingInvestment": false, "standQty": 5, "elecMgrFee": 0}, "27": {"canopyQty": 0, "buildingType": "general", "chargerItems": [{"model": "HEV-S21007", "unitPrice": 650000, "kw": 7, "qty": 7, "id": 1, "location": "옥외"}], "buildingMarginRate": 15, "contractKW": 35, "elecMgrFee": 0, "standQty": 0, "buildingInvestment": false, "includeSupv": false, "subsidyApplied": false, "inspectionCount": 1, "standUnitPrice": 0, "includeSafety": true, "includeInspection": true, "includeKepco": false, "powerPoints": [{"label": "거점 1", "powerSupplyType": "모자분리", "id": 1780556658687, "contractKW": 35, "includeSafety": true, "includeInsp": false}], "powerSupplyType": "신규수전(지중)", "workTime": "주간", "canopyUnitPrice": 0, "includeInsp": false, "buildingFundAmount": 0, "includeElecMgr": false, "elecItems": [{"unit": "식", "qty": "1", "unitPrice": 2300000, "id": 200, "name": "전기공사"}], "includeInsurance": true}, "28": {"canopyQty": 0, "buildingType": "general", "buildingMarginRate": 15, "chargerItems": [{"unitPrice": 650000, "kw": 7, "qty": 2, "model": "HEV-S21007", "id": 1, "location": "옥외"}], "contractKW": 14, "elecMgrFee": 0, "standQty": 0, "includeSupv": false, "buildingInvestment": false, "standUnitPrice": 135000, "subsidyApplied": true, "inspectionCount": 3, "includeSafety": true, "includeInspection": true, "powerPoints": [{"powerSupplyType": "신규수전(지중)", "contractKW": 14, "id": 1780308187078, "label": "거점 1", "includeInsp": false, "includeSafety": true}], "includeKepco": true, "workTime": "주간", "canopyUnitPrice": 0, "powerSupplyType": "신규수전(지중)", "includeInsp": false, "includeElecMgr": false, "buildingFundAmount": 0, "elecItems": [{"id": 200, "name": "철거공사비", "unit": "식", "unitPrice": 836364, "qty": "1"}, {"id": 202, "name": "신규설치비", "unit": "식", "unitPrice": 4954545, "qty": "1"}], "includeInsurance": true}, "29": {"elecItems": [{"name": "교체공사비", "id": 201, "unitPrice": 1236364, "qty": "1", "unit": "식"}], "includeInsurance": true, "includeInsp": false, "buildingFundAmount": 0, "includeElecMgr": false, "powerPoints": [{"powerSupplyType": "모자분리", "contractKW": 35, "id": 1780563667319, "label": "거점 2", "includeInsp": false, "includeSafety": true}], "includeKepco": false, "workTime": "주간", "canopyUnitPrice": 0, "powerSupplyType": "신규수전(지중)", "includeSafety": true, "includeInspection": true, "includeSupv": false, "buildingInvestment": false, "standUnitPrice": 135000, "inspectionCount": 1, "subsidyApplied": false, "elecMgrFee": 0, "standQty": 0, "chargerItems": [{"id": 1, "location": "옥외", "model": "HEV-S21007", "qty": 5, "kw": 7, "unitPrice": 650000}], "buildingMarginRate": 15, "contractKW": 35, "buildingType": "general", "canopyQty": 0}, "30": {"includeSafety": true, "includeInspection": true, "powerPoints": [{"includeSafety": true, "includeInsp": false, "contractKW": 42, "id": 1780565014320, "powerSupplyType": "모자분리", "label": "거점 1"}], "includeKepco": false, "workTime": "주간", "canopyUnitPrice": 0, "powerSupplyType": "신규수전(지중)", "includeInsp": false, "buildingFundAmount": 0, "includeElecMgr": false, "elecItems": [{"name": "신규설치공사", "id": 200, "unitPrice": 6736363, "qty": "1", "unit": "식"}, {"name": "철거공사", "id": 201, "qty": "1", "unitPrice": 2727272, "unit": "식"}], "includeInsurance": true, "canopyQty": 0, "buildingType": "general", "chargerItems": [{"unitPrice": 650000, "kw": 7, "qty": 0, "model": "HEV-S21007", "id": 1, "location": "옥내"}], "buildingMarginRate": 15, "contractKW": 42, "standQty": 0, "elecMgrFee": 0, "includeSupv": false, "buildingInvestment": false, "standUnitPrice": 0, "subsidyApplied": false, "inspectionCount": 1}, "31": {"contractKW": 35, "chargerItems": [{"location": "옥외", "id": 1, "model": "HEV-S21007", "qty": 7, "kw": 7, "unitPrice": 650000}], "buildingMarginRate": 15, "buildingType": "general", "canopyQty": 0, "standUnitPrice": 0, "inspectionCount": 1, "subsidyApplied": false, "includeSupv": false, "buildingInvestment": false, "elecMgrFee": 0, "standQty": 0, "canopyUnitPrice": 0, "workTime": "주간", "powerSupplyType": "신규수전(지중)", "powerPoints": [{"label": "거점 1", "id": 1781153408095, "contractKW": 35, "powerSupplyType": "모자분리", "includeSafety": true, "includeInsp": false}], "includeKepco": false, "includeInspection": true, "includeSafety": true, "includeInsurance": true, "elecItems": [{"name": "전원점변경시 시공비", "id": 200, "unitPrice": 6020000, "qty": "0", "unit": "식"}, {"unit": "식", "unitPrice": 3340000, "qty": "1", "id": 201, "name": "1기 이전설치시 시공비"}], "buildingFundAmount": 0, "includeElecMgr": true, "includeInsp": false}, "32": {"contractKW": 21, "chargerItems": [{"location": "옥내", "id": 1, "model": "HEV-S21007", "qty": 3, "unitPrice": 650000, "kw": 7}], "buildingMarginRate": 15, "buildingType": "general", "canopyQty": 0, "standUnitPrice": 90000, "inspectionCount": 1, "subsidyApplied": false, "buildingInvestment": false, "includeSupv": false, "elecMgrFee": 0, "standQty": 3, "canopyUnitPrice": 0, "workTime": "주간", "powerSupplyType": "신규수전(지중)", "powerPoints": [{"includeInsp": false, "includeSafety": true, "label": "거점 1", "powerSupplyType": "모자분리", "contractKW": 21, "id": 1781248218886}], "includeKepco": false, "includeInspection": true, "includeSafety": true, "includeInsurance": true, "elecItems": [{"id": 200, "name": "전기공사비", "unit": "식", "unitPrice": 3900000, "qty": "1"}], "buildingFundAmount": 0, "includeElecMgr": false, "includeInsp": false}, "33": {"includeInsp": false, "buildingFundAmount": 0, "includeElecMgr": true, "elecItems": [{"id": 200, "name": "전기공사", "unit": "식", "qty": "1", "unitPrice": 1660000}], "includeInsurance": true, "includeSafety": true, "includeInspection": true, "includeKepco": false, "powerPoints": [{"label": "거점 1", "id": 1781696357358, "contractKW": 7, "powerSupplyType": "모자분리", "includeSafety": true, "includeInsp": false}], "powerSupplyType": "신규수전(지중)", "workTime": "주간", "canopyUnitPrice": 0, "standQty": 0, "elecMgrFee": 0, "includeSupv": false, "buildingInvestment": false, "inspectionCount": 1, "subsidyApplied": false, "standUnitPrice": 0, "buildingType": "general", "canopyQty": 0, "chargerItems": [{"location": "옥내", "id": 1, "model": "HEV-S1007A", "qty": 1, "unitPrice": 0, "kw": 7}], "buildingMarginRate": 15, "contractKW": 7}, "34": {"includeInspection": true, "includeSafety": true, "powerSupplyType": "신규수전(지중)", "canopyUnitPrice": 0, "workTime": "주간", "includeKepco": false, "powerPoints": [{"includeInsp": false, "includeSafety": true, "id": 1781699637831, "contractKW": 14, "powerSupplyType": "모자분리", "label": "거점 1"}], "includeElecMgr": true, "buildingFundAmount": 0, "includeInsp": false, "includeInsurance": true, "elecItems": [{"id": 200, "name": "전기공사", "unit": "식", "qty": "1", "unitPrice": 3140000}], "canopyQty": 0, "buildingType": "general", "contractKW": 14, "chargerItems": [{"id": 1, "location": "옥내", "qty": 2, "unitPrice": 0, "kw": 7, "model": "HEV-S1007A"}], "buildingMarginRate": 15, "standQty": 2, "elecMgrFee": 0, "inspectionCount": 1, "subsidyApplied": false, "standUnitPrice": 125000, "buildingInvestment": false, "includeSupv": false}, "35": {"contractKW": 77, "chargerItems": [{"model": "HEV-S21007", "qty": 11, "kw": 7, "unitPrice": 650000, "location": "옥내", "id": 1}], "buildingMarginRate": 15, "buildingType": "general", "canopyQty": 0, "inspectionCount": 1, "subsidyApplied": false, "standUnitPrice": 0, "buildingInvestment": false, "includeSupv": false, "elecMgrFee": 0, "standQty": 0, "powerSupplyType": "신규수전(지중)", "canopyUnitPrice": 0, "workTime": "주간", "includeKepco": false, "powerPoints": [{"id": 1781700955599, "contractKW": 77, "powerSupplyType": "모자분리", "label": "거점 1", "includeSafety": true, "includeInsp": false}], "includeInspection": true, "includeSafety": true, "includeInsurance": true, "elecItems": [{"id": 200, "name": "전기공사", "unit": "식", "qty": "1", "unitPrice": 2400000}], "includeElecMgr": true, "buildingFundAmount": 0, "includeInsp": false}, "36": {"elecItems": [{"unitPrice": 1760000, "qty": "1", "unit": "식", "name": "전기공사 (2도도색 3면 포함)", "id": 200}], "includeInsurance": true, "includeInsp": false, "includeElecMgr": true, "buildingFundAmount": 0, "includeKepco": true, "powerPoints": [{"includeSafety": true, "includeInsp": false, "label": "거점 1", "powerSupplyType": "모자분리", "contractKW": 21, "id": 1782439312437}], "powerSupplyType": "신규수전(지중)", "workTime": "주간", "canopyUnitPrice": 0, "includeSafety": true, "includeInspection": true, "buildingInvestment": false, "includeSupv": false, "inspectionCount": 1, "subsidyApplied": false, "standUnitPrice": 0, "elecMgrFee": 0, "standQty": 0, "chargerItems": [{"model": "HEV-S21007", "kw": 7, "unitPrice": 650000, "qty": 3, "location": "옥내", "id": 1}], "buildingMarginRate": 15, "contractKW": 21, "canopyQty": 0, "buildingType": "general"}, "37": {"includeInspection": true, "includeSafety": true, "powerSupplyType": "신규수전(지중)", "workTime": "주간", "canopyUnitPrice": 0, "includeKepco": true, "powerPoints": [{"includeSafety": true, "includeInsp": false, "powerSupplyType": "모자분리", "id": 1782439762472, "contractKW": 14, "label": "거점 1"}, {"includeSafety": true, "includeInsp": false, "id": 1782439769400, "contractKW": 21, "powerSupplyType": "모자분리", "label": "거점 2"}], "includeElecMgr": true, "buildingFundAmount": 0, "includeInsp": true, "includeInsurance": true, "elecItems": [{"unit": "식", "qty": "1", "unitPrice": 1350000, "id": 200, "name": "전기공사"}], "buildingType": "general", "canopyQty": 0, "contractKW": 35, "chargerItems": [{"model": "HEV-S21007", "qty": 5, "unitPrice": 650000, "kw": 7, "id": 1, "location": "옥내"}], "buildingMarginRate": 15, "standQty": 0, "elecMgrFee": 0, "inspectionCount": 1, "subsidyApplied": false, "standUnitPrice": 0, "buildingInvestment": false, "includeSupv": false}, "38": {"powerPoints": [{"label": "거점 1", "powerSupplyType": "모자분리", "id": 1782699857162, "contractKW": 14, "includeSafety": true, "includeInsp": false}], "includeKepco": false, "canopyUnitPrice": 0, "workTime": "주간", "powerSupplyType": "신규수전(지중)", "includeSafety": true, "includeInspection": true, "elecItems": [{"name": "전기공사", "id": 200, "qty": "1", "unitPrice": 960000, "unit": "식"}], "includeInsurance": true, "includeInsp": false, "includeElecMgr": true, "buildingFundAmount": 0, "buildingMarginRate": 15, "chargerItems": [{"location": "옥외", "id": 1, "model": "HEV-S21007", "unitPrice": 650000, "kw": 7, "qty": 2}], "contractKW": 14, "buildingType": "general", "canopyQty": 0, "includeSupv": false, "buildingInvestment": false, "standUnitPrice": 0, "inspectionCount": 1, "subsidyApplied": false, "standQty": 0, "elecMgrFee": 0}, "39": {"elecItems": [{"name": "전기공사", "id": 200, "unitPrice": 2050000, "qty": "1", "unit": "식"}], "includeInsurance": true, "includeInsp": false, "includeElecMgr": true, "buildingFundAmount": 0, "includeKepco": false, "powerPoints": [{"label": "거점 1", "contractKW": 67, "id": 1783559450420, "powerSupplyType": "모자분리", "includeSafety": true, "includeInsp": false}], "powerSupplyType": "신규수전(지중)", "canopyUnitPrice": 0, "workTime": "주간", "includeSafety": true, "includeInspection": true, "buildingInvestment": false, "includeSupv": false, "inspectionCount": 1, "subsidyApplied": false, "standUnitPrice": 130000, "standQty": 2, "elecMgrFee": 0, "buildingMarginRate": 15, "chargerItems": [{"id": 1, "location": "옥외", "model": "HEV-S1007A", "unitPrice": 650000, "qty": 2, "kw": 7}, {"id": 2, "location": "옥외", "model": "HEV-Q2050", "kw": 50, "qty": 1, "unitPrice": 9000000}], "contractKW": 67, "buildingType": "general", "canopyQty": 1}, "40": {"contractKW": 21, "buildingType": "general", "powerSupplyType": "신규수전(지중)", "powerPoints": [{"id": 1784082790411, "label": "거점 1", "contractKW": 21, "powerSupplyType": "모자분리", "includeInsp": false, "includeSafety": true}], "workTime": "주간", "includeInsp": false, "includeSafety": true, "includeKepco": false, "includeSupv": false, "includeElecMgr": false, "includeInspection": true, "includeInsurance": true, "elecMgrFee": 0, "inspectionCount": 1, "subsidyApplied": true, "buildingInvestment": false, "buildingFundAmount": 0, "buildingMarginRate": 15, "chargerItems": [{"id": 1, "kw": 7, "model": "HEV-S21007", "location": "옥외", "qty": 3, "unitPrice": 650000}], "standQty": 3, "standUnitPrice": 130000, "canopyQty": 0, "canopyUnitPrice": 0, "elecItems": [{"id": 200, "name": "전기공사", "qty": "1", "unit": "식", "unitPrice": 8010000}]}, "41": {"contractKW": 49, "buildingType": "general", "powerSupplyType": "신규수전(지중)", "powerPoints": [{"id": 1784082790411, "label": "거점 1", "contractKW": 49, "powerSupplyType": "신규수전(가공)", "includeInsp": false, "includeSafety": true}], "workTime": "주간", "includeInsp": false, "includeSafety": true, "includeKepco": true, "includeSupv": false, "includeElecMgr": false, "includeInspection": true, "includeInsurance": true, "elecMgrFee": 0, "inspectionCount": 1, "subsidyApplied": true, "buildingInvestment": false, "buildingFundAmount": 0, "buildingMarginRate": 15, "chargerItems": [{"id": 1, "kw": 7, "model": "HEV-S21007", "location": "옥외", "qty": 7, "unitPrice": 650000}], "standQty": 7, "standUnitPrice": 130000, "canopyQty": 0, "canopyUnitPrice": 0, "elecItems": [{"id": 200, "name": "전기공사", "qty": "1", "unit": "식", "unitPrice": 12050000}]}, "42": {"contractKW": 21, "buildingType": "general", "powerSupplyType": "신규수전(지중)", "powerPoints": [{"id": 1784090937663, "label": "거점 1", "contractKW": 21, "powerSupplyType": "모자분리", "includeInsp": false, "includeSafety": true}], "workTime": "주간", "includeInsp": false, "includeSafety": true, "includeKepco": false, "includeSupv": false, "includeElecMgr": false, "includeInspection": true, "includeInsurance": true, "elecMgrFee": 0, "inspectionCount": 1, "subsidyApplied": false, "buildingInvestment": false, "buildingFundAmount": 0, "buildingMarginRate": 15, "chargerItems": [{"id": 1, "kw": 7, "model": "HEV-S21007", "location": "옥내", "qty": 2, "unitPrice": 650000}], "standQty": 2, "standUnitPrice": 130000, "canopyQty": 0, "canopyUnitPrice": 0, "elecItems": [{"id": 200, "name": "전기공사", "qty": "1", "unit": "식", "unitPrice": 4440000}]}}};
+
+function NumInput({value, onChange, placeholder, style, className}){
+  const [local,setLocal]=useState(value==null?'':String(value));
+  useEffect(()=>{ setLocal(value==null?'':String(value)); },[value]);
+  const commit=()=>{ const n=parseFloat(local); onChange(isNaN(n)?0:n); };
+  return <input type="text" inputMode="decimal" className={className||'cp-input'}
+    value={local} placeholder={placeholder} style={style}
+    onChange={e=>setLocal(e.target.value)}
+    onBlur={commit} onKeyDown={e=>{ if(e.key==='Enter'){e.target.blur();} }}
+  />;
+}
+
+function CostTab({site,cd,sm,updCost}){
+  const set=(k,v)=>updCost({[k]:v});
+  const kw=parseFloat(cd.contractKW)||0;
+  // Which case is currently active in sim tab
+  const activeCaseType=sm?.contractType==='new'?'N':(sm?.caseType||'B');
+
+  // Charger items CRUD
+  // Charger items CRUD — ID를 현재 항목에서 매번 계산
+  const addChargerItem=()=>{
+    const items=cd.chargerItems||[];
+    const id=items.length===0?100:Math.max(...items.map(i=>i.id||0))+1;
+    updCost({chargerItems:[...items,{id,kw:7,model:'HEV-S1007A',location:'옥내',qty:0,unitPrice:0}]});
+  };
+  const updChargerItem=(id,p)=>updCost({chargerItems:(cd.chargerItems||[]).map(i=>i.id===id?{...i,...p}:i)});
+  const delChargerItem=(id)=>updCost({chargerItems:(cd.chargerItems||[]).filter(i=>i.id!==id)});
+
+  // Elec items CRUD — ID를 현재 항목에서 매번 계산
+  const addElecItem=()=>{
+    const items=cd.elecItems||[];
+    const id=items.length===0?200:Math.max(...items.map(i=>i.id||0))+1;
+    updCost({elecItems:[...items,{id,name:'',qty:0,unit:'식',unitPrice:0}]});
+  };
+  const updElecItem=(id,p)=>updCost({elecItems:(cd.elecItems||[]).map(i=>i.id===id?{...i,...p}:i)});
+  const delElecItem=(id)=>updCost({elecItems:(cd.elecItems||[]).filter(i=>i.id!==id)});
+
+  const ct=useMemo(()=>calcCostTotals(cd),[cd]);
+
+  const Chk=({k,label})=><div className="chk-row" onClick={()=>set(k,!cd[k])}>
+    <div className={`chk-box ${cd[k]?'on':''}`}>{cd[k]&&<span style={{color:'#fff',fontSize:9,fontWeight:700}}>✓</span>}</div>
+    <span className="chk-lbl">{label}</span>
+  </div>;
+
+  const VatBreak=({ex,label})=>{
+    return <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:5,padding:'5px 8px',background:'var(--s2)',borderRadius:5,border:'1px solid var(--bd)'}}>
+      <span style={{fontSize:10,fontWeight:600,color:'var(--ink3)'}}>{label||'소계'}</span>
+      <span style={{fontSize:11,fontFamily:'IBM Plex Mono',fontWeight:700,color:'var(--ink)',marginLeft:12}}>{fWon(ex)}</span>
+    </div>;
+  };
+
+  // 거점 목록 (powerPoints 배열 우선, 없으면 단일값에서 마이그레이션)
+  const powerPoints = cd.powerPoints && cd.powerPoints.length>0 ? cd.powerPoints
+    : cd.contractKW ? [{...POWER_POINT_0(1), contractKW:cd.contractKW, powerSupplyType:cd.powerSupplyType||'신규수전(지중)'}]
+    : [POWER_POINT_0(1)];
+  const totalKW = mergePowerPoints(powerPoints);
+  const updPP=(id,patch)=>updCost({powerPoints:powerPoints.map(p=>p.id===id?{...p,...patch}:p), contractKW:mergePowerPoints(powerPoints.map(p=>p.id===id?{...p,...patch}:p))});
+  const addPP=()=>{ const n=powerPoints.length+1; const np=[...powerPoints,POWER_POINT_0(n)]; updCost({powerPoints:np,contractKW:mergePowerPoints(np)}); };
+  const removePP=(id)=>{ if(powerPoints.length<=1)return; const np=powerPoints.filter(p=>p.id!==id); updCost({powerPoints:np,contractKW:mergePowerPoints(np)}); };
+
+  const ppHint = powerPoints.length>1?`(${powerPoints.length}개 거점 합산)`:'';
+  const autoFees=[
+    {key:'includeInsp',      label:'사용전검사비',     ex:ct.inspEx,       formula:powerPoints.length>1?`거점별 합산 ${ppHint}`:`94,000 + ${totalKW}kW × 391원`, managed:powerPoints.length>1},
+    {key:'includeSafety',    label:'전기안전점검비',   ex:ct.safetyEx,     formula:powerPoints.length>1?`거점별 합산 ${ppHint}`:`${SAFETY_T[cd.buildingType||'general']?.label} 기준`, managed:powerPoints.length>1},
+    {key:'includeKepco',     label:'한전불입금',       ex:ct.kepcoEx,      formula:powerPoints.length>1?`거점별 수전방식 합산 ${ppHint}`:`${(powerPoints[0]?.powerSupplyType)||cd.powerSupplyType||'신규수전(지중)'} 기준`},
+    {key:'includeSupv',      label:'감리비',           ex:ct.supervEx,     formula:`${kw}kW 구간`},
+    {key:'includeElecMgr',   label:'전기안전관리자',   ex:ct.elecMgrEx,    formula:'직접 입력', hasInput:true},
+    {key:'includeInspection',label:'정기검사',         ex:ct.inspectionEx, hasCountInput:true, formula:(()=>{
+      const ci=cd.chargerItems||[];
+      const sw=ci.filter(i=>parseFloat(i.kw)<=7).reduce((s,i)=>s+(i.qty||0),0);
+      const f1=ci.filter(i=>parseFloat(i.kw)>7&&parseFloat(i.kw)<=100).reduce((s,i)=>s+(i.qty||0),0);
+      const f2=ci.filter(i=>parseFloat(i.kw)>100&&parseFloat(i.kw)<=400).reduce((s,i)=>s+(i.qty||0),0);
+      const f3=ci.filter(i=>parseFloat(i.kw)>400).reduce((s,i)=>s+(i.qty||0),0);
+      const hf=f1+f2+f3>0;
+      if(!sw&&!hf) return '충전기 미입력';
+      const fastParts=[];
+      if(f1>0) fastParts.push(`100kW이하 ${f1}기×46,000`);
+      if(f2>0) fastParts.push(`400kW이하 ${f2}기×55,400`);
+      if(f3>0) fastParts.push(`400kW초과 ${f3}기×62,500`);
+      if(hf&&sw>0) return `혼합: 170,000 + ${fastParts.join(' + ')} + 완속 ${sw}기×7,700`;
+      if(hf) return `급속: 170,000 + ${fastParts.join(' + ')}`;
+      return `완속: 43,000 + ${sw}기×7,700`;
+    })()},
+    {key:'includeInsurance', label:'보험료',           ex:ct.insuranceEx,  formula:`${ct.totalChargers}기 × ${ct.totalChargers<=6?'20,000원 고정':'3,208원/기'} (공급가액)`},
+  ];
+
+
+
+  return <div className="cost-layout">
+    {/* ── LEFT ── */}
+    <div className="cost-col-1" style={{display:'flex',flexDirection:'column',gap:10}}>
+      <div className="card">
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
+          <div className="card-title" style={{marginBottom:0}}>⚡ 계약전력 및 건물 정보</div>
+          <button onClick={addPP}
+            style={{fontSize:10,fontWeight:700,padding:'3px 10px',background:'var(--accl)',border:'1px solid var(--acc)',borderRadius:5,color:'var(--acc)',cursor:'pointer',fontFamily:'inherit'}}>
+            + 거점 추가
+          </button>
+        </div>
+
+        {/* 거점별 계약전력 카드 */}
+        <div style={{display:'flex',flexDirection:'column',gap:7,marginBottom:10}}>
+          {powerPoints.map((pp,pi)=>{
+            const ppKW=parseFloat(pp.contractKW)||0;
+            const inspAmt=pp.includeInsp!==false?calcInsp(ppKW):0;
+            const safetyAmt=pp.includeSafety!==false?calcSafety(ppKW,cd.buildingType):0;
+            const kepcoAmt=calcKepco(ppKW,pp.powerSupplyType||'신규수전(지중)');
+            return <div key={pp.id} style={{background:'var(--s2)',border:'1px solid var(--bd)',borderRadius:7,padding:'9px 10px'}}>
+              {/* 거점 헤더 */}
+              <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:7}}>
+                <span style={{fontSize:10,fontWeight:700,color:'var(--acc)',fontFamily:'IBM Plex Mono',flexShrink:0}}>#{pi+1}</span>
+                <input style={{flex:1,fontSize:11,fontWeight:600,background:'transparent',border:'none',borderBottom:'1px solid var(--bd)',outline:'none',color:'var(--ink)',padding:'1px 3px',fontFamily:'inherit'}}
+                  value={pp.label||`거점 ${pi+1}`} onChange={e=>updPP(pp.id,{label:e.target.value})} placeholder={`거점 ${pi+1}`}/>
+                {powerPoints.length>1&&<button onClick={()=>removePP(pp.id)}
+                  style={{width:20,height:20,borderRadius:4,border:'1px solid var(--red2)',background:'var(--redd)',color:'var(--red)',cursor:'pointer',fontSize:12,fontWeight:700,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,fontFamily:'inherit'}}>×</button>}
+              </div>
+              {/* 계약전력 + 수전방식 */}
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:7}}>
+                <div>
+                  <div className="flbl">계약전력 (kW)</div>
+                  <input className="finput" type="number" step="1" value={pp.contractKW||''} placeholder="kW"
+                    onChange={e=>updPP(pp.id,{contractKW:+e.target.value})}/>
+                </div>
+                <div>
+                  <div className="flbl">수전방식</div>
+                  <div style={{display:'flex',flexDirection:'column',gap:3,marginTop:2}}>
+                    {['모자분리','신규수전(지중)','신규수전(가공)'].map(v=>(
+                      <button key={v} className={`tog ${(pp.powerSupplyType||'신규수전(지중)')===v?'on':''}`}
+                        style={{fontSize:10,padding:'3px 4px',textAlign:'left'}}
+                        onClick={()=>updPP(pp.id,{powerSupplyType:v})}>{v}</button>
+                    ))}
+                  </div>
+                  {(pp.powerSupplyType||'신규수전(지중)')==='모자분리'&&<div className="fhint" style={{color:'var(--grn)',marginTop:2}}>한전불입금 없음</div>}
+                </div>
+              </div>
+              {/* 세부설치위치 */}
+              <div style={{borderTop:'1px dashed var(--bd)',paddingTop:6,marginBottom:6}}>
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:4}}>
+                  <div style={{fontSize:9,fontWeight:700,color:'var(--ink3)'}}>📍 세부 설치위치</div>
+                  <button onClick={()=>{
+                    const locs=pp.installLocations||[];
+                    updPP(pp.id,{installLocations:[...locs,{id:Date.now(),name:'',detail:''}]});
+                  }} style={{fontSize:9,fontWeight:700,padding:'2px 7px',background:'var(--accl)',border:'1px solid var(--acc)',borderRadius:4,color:'var(--acc)',cursor:'pointer',fontFamily:'inherit'}}>+ 추가</button>
+                </div>
+                {(pp.installLocations||[]).length===0
+                  ? <div style={{fontSize:9,color:'var(--ink3)',padding:'4px 0'}}>설치위치를 추가하세요</div>
+                  : (pp.installLocations||[]).map((loc,li)=>(
+                    <div key={loc.id} style={{display:'flex',gap:4,alignItems:'center',marginBottom:3}}>
+                      <span style={{fontSize:9,fontWeight:700,color:'var(--acc)',fontFamily:'IBM Plex Mono',flexShrink:0}}>{li+1}</span>
+                      <input placeholder="예: B1F / 13기둥 / 5기" value={loc.detail||''}
+                        onChange={e=>{const nl=[...(pp.installLocations||[])]; nl[li]={...nl[li],detail:e.target.value}; updPP(pp.id,{installLocations:nl});}}
+                        style={{flex:1,padding:'4px 6px',fontSize:10,border:'1px solid var(--bd)',borderRadius:4,background:'#fff',color:'var(--ink)',fontFamily:'inherit',outline:'none',boxSizing:'border-box'}}/>
+                      <button onClick={()=>{const nl=(pp.installLocations||[]).filter(l=>l.id!==loc.id); updPP(pp.id,{installLocations:nl});}}
+                        style={{background:'none',border:'none',cursor:'pointer',fontSize:14,color:'var(--red)',padding:'0 2px',lineHeight:1,flexShrink:0}}>×</button>
+                    </div>
+                  ))
+                }
+              </div>
+              {/* 자동계산 비용 체크박스 */}
+              {ppKW>0&&<div style={{borderTop:'1px dashed var(--bd)',paddingTop:6,display:'flex',flexDirection:'column',gap:3}}>
+                <div style={{fontSize:9,fontWeight:700,color:'var(--ink3)',marginBottom:2}}>자동 계산 비용</div>
+                {/* 사용전검사비 */}
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'3px 6px',
+                  background:pp.includeInsp!==false?'var(--accl)':'var(--s3)',
+                  border:`1px solid ${pp.includeInsp!==false?'rgba(29,78,216,.2)':'var(--bd)'}`,
+                  borderRadius:4,cursor:'pointer'}}
+                  onClick={()=>updPP(pp.id,{includeInsp:pp.includeInsp===false?true:false})}>
+                  <div style={{display:'flex',alignItems:'center',gap:5}}>
+                    <div style={{width:13,height:13,borderRadius:3,flexShrink:0,
+                      border:`2px solid ${pp.includeInsp!==false?'var(--acc)':'var(--bd)'}`,
+                      background:pp.includeInsp!==false?'var(--acc)':'transparent',
+                      display:'flex',alignItems:'center',justifyContent:'center'}}>
+                      {pp.includeInsp!==false&&<span style={{color:'#fff',fontSize:8,fontWeight:700}}>✓</span>}
+                    </div>
+                    <span style={{fontSize:10,color:pp.includeInsp!==false?'var(--acc)':'var(--ink3)',fontWeight:600}}>사용전검사비</span>
+                    <span style={{fontSize:9,color:'var(--ink3)'}}>94,000 + {ppKW}kW×391원</span>
+                  </div>
+                  <span style={{fontSize:10,fontFamily:'IBM Plex Mono',fontWeight:700,color:pp.includeInsp!==false?'var(--acc)':'var(--ink3)'}}>
+                    {pp.includeInsp!==false?fWon(inspAmt):'제외'}
+                  </span>
+                </div>
+                {/* 전기안전점검비 */}
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'3px 6px',
+                  background:pp.includeSafety!==false?'var(--accl)':'var(--s3)',
+                  border:`1px solid ${pp.includeSafety!==false?'rgba(29,78,216,.2)':'var(--bd)'}`,
+                  borderRadius:4,cursor:'pointer'}}
+                  onClick={()=>updPP(pp.id,{includeSafety:pp.includeSafety===false?true:false})}>
+                  <div style={{display:'flex',alignItems:'center',gap:5}}>
+                    <div style={{width:13,height:13,borderRadius:3,flexShrink:0,
+                      border:`2px solid ${pp.includeSafety!==false?'var(--acc)':'var(--bd)'}`,
+                      background:pp.includeSafety!==false?'var(--acc)':'transparent',
+                      display:'flex',alignItems:'center',justifyContent:'center'}}>
+                      {pp.includeSafety!==false&&<span style={{color:'#fff',fontSize:8,fontWeight:700}}>✓</span>}
+                    </div>
+                    <span style={{fontSize:10,color:pp.includeSafety!==false?'var(--acc)':'var(--ink3)',fontWeight:600}}>전기안전점검비</span>
+                    <span style={{fontSize:9,color:'var(--ink3)'}}>({SAFETY_T[cd.buildingType||'general']?.label})</span>
+                  </div>
+                  <span style={{fontSize:10,fontFamily:'IBM Plex Mono',fontWeight:700,color:pp.includeSafety!==false?'var(--acc)':'var(--ink3)'}}>
+                    {pp.includeSafety!==false?fWon(safetyAmt):'제외'}
+                  </span>
+                </div>
+                {/* 한전불입금 (수전방식에 따라 자동) */}
+                {(pp.powerSupplyType||'신규수전(지중)')!=='모자분리'&&kepcoAmt>0&&<div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'3px 6px',background:'var(--grnd)',border:'1px solid var(--grn2)',borderRadius:4}}>
+                  <span style={{fontSize:10,color:'var(--grn)',fontWeight:600}}>한전불입금 ({pp.powerSupplyType||'신규수전(지중)'})</span>
+                  <span style={{fontSize:10,fontFamily:'IBM Plex Mono',fontWeight:700,color:'var(--grn)'}}>{fWon(kepcoAmt)}</span>
+                </div>}
+              </div>}
+            </div>;
+          })}
+        </div>
+
+        {/* 합계 표시 */}
+        {powerPoints.length>1&&<div style={{padding:'6px 10px',background:'var(--ink)',borderRadius:6,marginBottom:10,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+          <span style={{fontSize:10,color:'rgba(255,255,255,.6)',fontWeight:600}}>총 계약전력 ({powerPoints.length}개 거점 합산)</span>
+          <span style={{fontSize:13,fontWeight:700,color:'#fff',fontFamily:'IBM Plex Mono'}}>{totalKW} kW</span>
+        </div>}
+
+        {/* 건물유형 + 보조금 (기존 유지) */}
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,borderTop:'1px solid var(--bd)',paddingTop:8}}>
+          <div>
+            <div className="flbl" style={{marginBottom:4}}>건물 유형 (전기안전점검비)</div>
+            <select className="fsel" value={cd.buildingType||'general'} onChange={e=>set('buildingType',e.target.value)}>
+              {Object.entries(SAFETY_T).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <div className="flbl" style={{marginBottom:4}}>💸 보조금 (Case C)</div>
+            <div className="tog-wrap" style={{flexDirection:'column',gap:3}}>
+              <button className={`tog ${!cd.subsidyApplied?'on':''}`} onClick={()=>set('subsidyApplied',false)}>미신청 (0%)</button>
+              <button className={`tog ${cd.subsidyApplied?'on-grn':''}`} onClick={()=>set('subsidyApplied',true)}>신청 (50% 지원)</button>
+            </div>
+            {cd.subsidyApplied&&<div style={{marginTop:4,fontSize:10,color:'var(--grn)',fontWeight:600}}>총 투자비의 50% 차감</div>}
+          </div>
+        </div>
+
+        {/* 🏢 건물주 투자 모드 ─ 우리가 투자하지 않고 건물측이 일정 금액을 투자하며,
+             우리는 그 금액으로 공사비를 집행 → 차액(투자금-공사비)이 당사 마진 */}
+        <div style={{marginTop:10,padding:'8px 10px',background:cd.buildingInvestment?'var(--orgd)':'var(--s2)',border:`1px solid ${cd.buildingInvestment?'var(--org2)':'var(--bd)'}`,borderRadius:6,transition:'.15s',display:'flex',alignItems:'center',gap:10,flexWrap:'nowrap'}}>
+          <div className="flbl" style={{margin:0,whiteSpace:'nowrap',flexShrink:0}}>🏢 투자 주체</div>
+          <div className="tog-wrap" style={{margin:0,flexShrink:0,display:'flex',gap:3}}>
+            <button className={`tog ${!cd.buildingInvestment?'on':''}`} style={{whiteSpace:'nowrap',flex:'0 0 auto',padding:'4px 10px'}} onClick={()=>set('buildingInvestment',false)}>당사 투자</button>
+            <button className={`tog ${cd.buildingInvestment?'on-org':''}`} style={cd.buildingInvestment?{background:'var(--org)',borderColor:'var(--org)',color:'#fff',whiteSpace:'nowrap',flex:'0 0 auto',padding:'4px 10px'}:{whiteSpace:'nowrap',flex:'0 0 auto',padding:'4px 10px'}} onClick={()=>set('buildingInvestment',true)}>건물측 투자</button>
+          </div>
+          {cd.buildingInvestment&&<div style={{display:'flex',alignItems:'center',gap:4,flexShrink:0,marginLeft:'auto',whiteSpace:'nowrap'}}>
+            <span style={{fontSize:10,color:'var(--org)',fontWeight:700}}>투자금액</span>
+            <span style={{fontSize:8,color:'var(--org)',fontWeight:700,opacity:0.7}}>VAT별도</span>
+            <input
+              className="cp-input"
+              type="text"
+              inputMode="numeric"
+              placeholder="0"
+              value={cd.buildingFundAmount?Number(cd.buildingFundAmount).toLocaleString('ko-KR'):''}
+              onChange={e=>{
+                const raw=e.target.value.replace(/[^\d]/g,'');
+                set('buildingFundAmount',raw?parseInt(raw,10):0);
+              }}
+              style={{width:120,fontSize:11,fontWeight:700,textAlign:'right',color:'var(--org)'}}
+            />
+            <span style={{fontSize:10,color:'var(--org)',fontWeight:700}}>원</span>
+          </div>}
+        </div>
+        {cd.buildingInvestment&&<div style={{marginTop:6,padding:'5px 9px',fontSize:10,color:'var(--ink2)',lineHeight:1.5,background:'var(--s2)',border:'1px dashed var(--org2)',borderRadius:5}}>
+          건물측에서 <strong style={{color:'var(--org)'}}>{fWon(cd.buildingFundAmount||0)}</strong>을 투자 → 당사가 공사비를 집행하고 <strong style={{color:'var(--org)'}}>차액(투자금 − 공사비)</strong>을 마진으로 가져갑니다. <span style={{color:'var(--ink3)'}}>※ 공사비 탭 표시에만 반영</span>
+        </div>}
+      </div>
+
+      <div className="card">
+        <div className="card-title">🔌 충전기 항목 (단가: 원, 부가세별도)</div>
+        <div className="cost-table-scroll">
+          <div>
+        {/* header: kW | 모델 | 위치 | 수량 | 단가(원) | 공급가액 | del */}
+        <div style={{display:'grid',gridTemplateColumns:'58px 100px 52px 46px 108px 96px 22px',gap:4,padding:'3px 0',borderBottom:'2px solid var(--bd)',marginBottom:3}}>
+          {['kW','모델','위치','수량','단가(원)','공급가액',''].map(h=>(
+            <div key={h} style={{fontSize:9,fontWeight:700,color:'var(--ink3)',textTransform:'uppercase',display:'flex',alignItems:'center'}}>{h}</div>
+          ))}
+        </div>
+        {(cd.chargerItems||[]).map(item=>{
+          const models=CHARGER_MODELS[item.kw]||['기타'];
+          const sub=(item.qty||0)*(item.unitPrice||0);
+          return <div key={item.id} style={{display:'grid',gridTemplateColumns:'58px 100px 52px 46px 108px 96px 22px',gap:4,padding:'3px 0',borderBottom:'1px solid var(--bd)',alignItems:'center'}}>
+            <select className="fsel" style={{fontSize:11,padding:'4px 4px'}} value={item.kw}
+              onChange={e=>{const nkw=parseFloat(e.target.value);updChargerItem(item.id,{kw:nkw,model:CHARGER_MODELS[nkw]?.[0]||'기타'});}}>
+              {CHARGER_KW.map(k=><option key={k} value={k}>{k}kW</option>)}
+            </select>
+            <select className="fsel" style={{fontSize:10,padding:'4px 3px'}} value={item.model}
+              onChange={e=>updChargerItem(item.id,{model:e.target.value})}>
+              {models.map(m=><option key={m}>{m}</option>)}
+            </select>
+            <select className="fsel" style={{fontSize:11,padding:'4px 3px'}} value={item.location}
+              onChange={e=>updChargerItem(item.id,{location:e.target.value})}>
+              {['옥내','옥외'].map(l=><option key={l}>{l}</option>)}
+            </select>
+            <input className="finput" type="number" style={{fontSize:11,padding:'4px 4px'}} value={item.qty||''} placeholder="0"
+              onChange={e=>updChargerItem(item.id,{qty:+e.target.value})}/>
+            <NumInput style={{fontSize:11,padding:'4px 4px'}} value={item.unitPrice||0}
+              onChange={v=>updChargerItem(item.id,{unitPrice:v})}/>
+            <div className="cir-val" style={{fontSize:10}}>{sub>0?fWon(sub):'—'}</div>
+            <button className="btn-ico" style={{padding:'2px 4px',fontSize:10}} onClick={()=>delChargerItem(item.id)}>✕</button>
+          </div>;
+        })}
+          </div>
+        </div>
+        <div style={{marginTop:6,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+          <button className="btn-s" style={{fontSize:10}} onClick={addChargerItem}>+ 충전기 추가</button>
+          {ct.chargerExVAT>0&&<VatBreak ex={ct.chargerExVAT} label="충전기 소계"/>}
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-title">🪵 스탠드폴 & 캐노피 (원, 부가세별도)</div>
+        <div className="cost-pair-grid" style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+          <div>
+            <div className="flbl" style={{marginBottom:5}}>🪵 스탠드폴</div>
+            <div className="fgrid">
+              <div className="fg"><div className="flbl">수량</div><input className="finput" type="number" value={cd.standQty||''} placeholder="0" onChange={e=>set('standQty',+e.target.value)}/></div>
+              <div className="fg"><div className="flbl">단가 (원)</div><NumInput value={cd.standUnitPrice||0} onChange={v=>set('standUnitPrice',v)}/></div>
+            </div>
+            {ct.standExVAT>0&&<VatBreak ex={ct.standExVAT}/>}
+          </div>
+          <div>
+            <div className="flbl" style={{marginBottom:5}}>⛺ 캐노피 (Case C)</div>
+            <div className="fgrid">
+              <div className="fg"><div className="flbl">수량</div><input className="finput" type="number" value={cd.canopyQty||''} placeholder="0" onChange={e=>set('canopyQty',+e.target.value)}/></div>
+              <div className="fg"><div className="flbl">단가 (원)</div><NumInput value={cd.canopyUnitPrice||0} onChange={v=>set('canopyUnitPrice',v)}/></div>
+            </div>
+            {ct.canopyExVAT>0&&<VatBreak ex={ct.canopyExVAT}/>}
+          </div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-title">🕐 공사 시간대 & ⚡ 전기공사비 (원, 부가세별도)</div>
+        <div className="cost-pair-grid" style={{display:'grid',gridTemplateColumns:'140px 1fr',gap:12,alignItems:'start'}}>
+          {/* 공사 시간대 */}
+          <div>
+            <div className="flbl" style={{marginBottom:5}}>공사 시간대</div>
+            <div style={{display:'flex',flexDirection:'column',gap:4}}>
+              {['주간','야간','주간+야간'].map(v=>(
+                <button key={v} className={`tog ${(cd.workTime||'주간')===v?'on':''}`}
+                  onClick={()=>set('workTime',v)}>{v}</button>
+              ))}
+            </div>
+            {cd.workTime==='야간'&&<div className="fhint" style={{marginTop:5,color:'var(--org)'}}>야간: 할증 확인 필요</div>}
+            {cd.workTime==='주간+야간'&&<div className="fhint" style={{marginTop:5,color:'var(--org)'}}>혼합: 구간별 단가</div>}
+          </div>
+          {/* 전기공사비 */}
+          <div>
+            <div className="cost-table-scroll">
+              <div style={{minWidth:350}}>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 52px 46px 100px 88px 22px',gap:4,padding:'3px 0',borderBottom:'2px solid var(--bd)',marginBottom:3}}>
+                  {['공종명','수량','단위','단가(원)','공급가액',''].map(h=><div key={h} style={{fontSize:9,fontWeight:700,color:'var(--ink3)',textTransform:'uppercase',display:'flex',alignItems:'center'}}>{h}</div>)}
+                </div>
+                {(cd.elecItems||[]).map(item=>{
+                  const sub=(parseFloat(item.qty)||0)*(parseFloat(item.unitPrice)||0);
+                  return <div key={item.id} style={{display:'grid',gridTemplateColumns:'1fr 52px 46px 100px 88px 22px',gap:4,padding:'3px 0',borderBottom:'1px solid var(--bd)'}}>
+                    <input className="finput" style={{fontSize:11,padding:'4px 4px'}} value={item.name||''} placeholder="공종명"
+                      onChange={e=>updElecItem(item.id,{name:e.target.value})}/>
+                    <input className="finput" type="number" style={{fontSize:11,padding:'4px 4px'}} value={item.qty||''} placeholder="0"
+                      onChange={e=>updElecItem(item.id,{qty:e.target.value})}/>
+                    <select className="fsel" style={{fontSize:11,padding:'4px 4px'}} value={item.unit||'식'}
+                      onChange={e=>updElecItem(item.id,{unit:e.target.value})}>
+                      {['식','m','개','대','세트','회','호'].map(u=><option key={u}>{u}</option>)}
+                    </select>
+                    <NumInput style={{fontSize:11,padding:'4px 4px'}} value={parseFloat(item.unitPrice)||0}
+                      onChange={v=>updElecItem(item.id,{unitPrice:v})}/>
+                    <div className="cir-val" style={{fontSize:10}}>{sub>0?fWon(sub):'—'}</div>
+                    <button className="btn-ico" style={{padding:'2px 4px',fontSize:10}} onClick={()=>delElecItem(item.id)}>✕</button>
+                  </div>;
+                })}
+              </div>
+            </div>
+            <div style={{marginTop:6,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+              <button className="btn-s" style={{fontSize:10}} onClick={addElecItem}>+ 공종 추가</button>
+              {ct.elecExVAT>0&&<VatBreak ex={ct.elecExVAT} label="전기공사비 소계"/>}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 인쇄용 페이지 구분: 공사시간대&전기공사비 ↓ / 법정비용~월매입비 ↑ */}
+      <div className="cost-print-break"/>
+
+      <div className="card">
+        <div className="card-title">📋 법정비용 (부가세별도 · 자동계산)</div>
+        <div style={{marginBottom:9}}>
+          {autoFees.map(f=>{
+            const isManaged=f.managed; // 거점별로 관리되는 항목
+            return <div key={f.key} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'4px 0',borderBottom:'1px solid var(--bd)',
+              background:isManaged?'var(--accl)':'transparent',borderRadius:isManaged?4:0,padding:isManaged?'4px 7px':'4px 0'}}>
+              <div style={{display:'flex',alignItems:'center',gap:7,flex:1}}>
+                {isManaged
+                  ? <div style={{display:'flex',alignItems:'center',gap:5}}>
+                      <span style={{fontSize:9,fontWeight:700,padding:'1px 5px',borderRadius:3,background:'var(--acc)',color:'#fff'}}>거점관리</span>
+                      <span className="chk-lbl" style={{fontWeight:600,color:'var(--acc)'}}>{f.label}</span>
+                    </div>
+                  : <div className="chk-row" onClick={()=>set(f.key,!cd[f.key])} style={{padding:'2px 0'}}>
+                      <div className={`chk-box ${cd[f.key]?'on':''}`}>{cd[f.key]&&<span style={{color:'#fff',fontSize:9,fontWeight:700}}>✓</span>}</div>
+                      <span className="chk-lbl" style={{fontWeight:600}}>{f.label}</span>
+                    </div>
+                }
+                <span style={{fontSize:9,color:isManaged?'var(--acc)':'var(--ink3)'}}>{f.formula}</span>
+                {f.isVatIncluded&&<span style={{fontSize:8,color:'var(--org)',fontWeight:600}}>VAT포함</span>}
+              </div>
+              {f.hasInput&&cd[f.key]
+                ? <input className="finput" type="number" placeholder="0"
+                    style={{width:90,fontSize:10,padding:'3px 5px',textAlign:'right'}}
+                    value={cd.elecMgrFee||''}
+                    onChange={e=>set('elecMgrFee',+e.target.value)}/>
+                : f.hasCountInput&&cd[f.key]
+                  ? <div style={{display:'flex',alignItems:'center',gap:4}}>
+                      <input className="finput" type="number" min="1" max="99" placeholder="1"
+                        style={{width:45,fontSize:10,padding:'3px 5px',textAlign:'right'}}
+                        value={cd.inspectionCount||1}
+                        onChange={e=>set('inspectionCount',Math.max(1,+e.target.value||1))}/>
+                      <span style={{fontSize:9,color:'var(--ink3)'}}>회</span>
+                      <span style={{fontFamily:'IBM Plex Mono',fontSize:10,color:'var(--acc)',minWidth:70,textAlign:'right'}}>{fWon(f.ex)}</span>
+                    </div>
+                  : <div style={{fontFamily:'IBM Plex Mono',fontSize:10,color:isManaged?'var(--acc)':cd[f.key]?'var(--acc)':'var(--ink3)',marginLeft:8,minWidth:80,textAlign:'right',fontWeight:isManaged?700:400}}>
+                      {isManaged?fWon(f.ex):cd[f.key]?fWon(f.ex):'미포함'}
+                    </div>
+              }
+            </div>;
+          })}
+        </div>
+        {ct.legalEx>0&&<VatBreak ex={ct.legalEx} label="법정비용 소계"/>}
+      </div>
+    </div>
+
+    {/* ── RIGHT: 합계 ── */}
+    <div style={{display:'flex',flexDirection:'column',gap:10}}>
+      {/* Summary box */}
+      <div className="cost-total-box">
+        {(()=>{
+          // 기준 공사비 (보조금 차감 전 / VAT별도)
+          const baseEx = activeCaseType==='C' ? ct.totalCEx : ct.totalBEx;
+          // 보조금 적용 시 순 공사비
+          const netEx  = activeCaseType==='C' ? (ct.totalCEx - Math.round(ct.subsidyAmt/1.1)) : baseEx;
+          // 건물주 청구 기준: 보조금 적용된 순 공사비 (실제 당사가 부담한 금액 기준으로 마진 계산)
+          const billBase = cd.subsidyApplied ? netEx : baseEx;
+
+          // ── 건물주 투자 모드 ──
+          if(cd.buildingInvestment){
+            const fundEx   = parseFloat(cd.buildingFundAmount)||0; // 투자금액 (원, VAT별도)
+            const marginEx = fundEx - billBase;                    // 차액 = 당사 마진
+            const marginPositive = marginEx >= 0;
+            return (
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:14}}>
+                <div>
+                  <div className="ct-label" style={{fontSize:11,color:'var(--org)'}}>🏢 건물측 투자금액</div>
+                  <div className="ct-val" style={{fontSize:20,color:'var(--org)'}}>{fW(toMan(fundEx))}</div>
+                  <div className="ct-sub" style={{color:'var(--org)'}}>VAT별도 · 건물측 입금</div>
+                </div>
+                <div>
+                  <div className="ct-label" style={{fontSize:11}}>{activeCaseType==='C'?(cd.subsidyApplied?'순 공사비 (보조금 차감)':'Case C 공사비'):activeCaseType==='N'?'신규 공사비':'Case '+activeCaseType+' 공사비'}</div>
+                  <div className="ct-val" style={{fontSize:18,color:'#fff'}}>{fW(toMan(billBase))}</div>
+                  <div className="ct-sub">매입 원가 · VAT별도</div>
+                </div>
+                <div style={{borderLeft:'1px dashed var(--bd2)',paddingLeft:14}}>
+                  <div className="ct-label" style={{fontSize:11,color:marginPositive?'var(--grn)':'var(--red)'}}>{marginPositive?'당사 마진 (차액)':'당사 추가 투자 (부족분)'}</div>
+                  <div className="ct-val" style={{fontSize:22,color:marginPositive?'var(--grn)':'var(--red)'}}>{marginPositive?'+':''}{fW(toMan(Math.abs(marginEx)))}</div>
+                  <div className="ct-sub" style={{color:marginPositive?'var(--grn)':'var(--red)'}}>{marginPositive?'즉시 차익':'⚠️ 투자금 부족 → 당사 부담'}</div>
+                </div>
+              </div>
+            );
+          }
+
+          // ── 기존 (당사 투자) ──
+          return activeCaseType==='C'
+            ?<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
+                <div>
+                  <div className="ct-label" style={{fontSize:11}}>Case C 총 공사비</div>
+                  <div className="ct-val" style={{fontSize:22}}>{fW(toMan(ct.totalCEx))}</div>
+                  <div className="ct-sub">VAT 별도</div>
+                </div>
+                <div>
+                  <div className="ct-label" style={{fontSize:11}}>보조금 차감 순 공사비</div>
+                  <div className="ct-val" style={{fontSize:22}}>{fW(toMan(ct.totalCEx-Math.round(ct.subsidyAmt/1.1)))}</div>
+                  <div className="ct-sub">{cd.subsidyApplied?'50% 보조금 적용':'보조금 미신청'}</div>
+                </div>
+              </div>
+            :<div>
+                <div className="ct-label" style={{fontSize:11}}>{activeCaseType==='N'?'신규계약':'Case '+activeCaseType} 총 공사비</div>
+                <div className="ct-val" style={{fontSize:22}}>{fW(toMan(ct.totalBEx))}</div>
+                <div className="ct-sub">VAT 별도</div>
+              </div>;
+        })()}
+      </div>
+
+      {/* Cost detail card */}
+      <div className="card">
+        <div className="card-title">
+          📋 {activeCaseType==='C'?'Case C':activeCaseType==='N'?'신규계약':'Case '+activeCaseType} 공사비 상세
+        </div>
+        <div className="cost-detail-scroll">
+        <div style={{minWidth:0}}>
+        {/* Header */}
+        <div style={{display:'grid',gridTemplateColumns:cd.subsidyApplied?'1fr 120px 100px':'1fr 120px',gap:6,padding:'4px 0',borderBottom:'2px solid var(--bd)',marginBottom:3}}>
+          <div style={{fontSize:9,fontWeight:700,color:'var(--ink3)'}}>항목</div>
+          <div style={{fontSize:9,fontWeight:700,color:'var(--ink3)',textAlign:'right'}}>공급가액</div>
+          {cd.subsidyApplied&&<div style={{fontSize:9,fontWeight:700,color:'var(--ink3)',textAlign:'right'}}>보조금</div>}
+        </div>
+        {(()=>{
+          const chargerMeta=(()=>{const items=cd.chargerItems||[];const tq=items.reduce((s,i)=>s+(i.qty||0),0);if(!tq)return'';const ps=[...new Set(items.map(i=>i.unitPrice||0))];return ps.length===1?`${tq}기 · ${fWon(ps[0])}`:`${tq}기 · 혼합단가`;})();
+          const standMeta=(cd.standQty||0)>0?`${cd.standQty}개 · ${fWon(cd.standUnitPrice||0)}`:'';
+          const canopyMeta=(cd.canopyQty||0)>0?`${cd.canopyQty}개 · ${fWon(cd.canopyUnitPrice||0)}`:'';
+          return (activeCaseType==='C'?[
+            {l:'충전기',        ex:ct.chargerExVAT, sub:ct.subsidyChargerEx, meta:chargerMeta},
+            {l:'스탠드폴',      ex:ct.standExVAT,   sub:ct.subsidyStandEx,   meta:standMeta},
+            {l:'캐노피',        ex:ct.canopyExVAT,  sub:ct.subsidyCanopyEx,  meta:canopyMeta},
+            {l:'전기공사비',    ex:ct.elecExVAT,    sub:ct.subsidyElecEx},
+            {l:'사용전검사비',  ex:ct.inspEx,        off:!cd.includeInsp},
+            {l:'전기안전점검비',ex:ct.safetyEx,      off:!cd.includeSafety},
+            {l:'한전불입금',    ex:ct.kepcoEx,       off:ct.kepcoEx===0, sub:ct.subsidyKepcoEx},
+            {l:'감리비',        ex:ct.supervEx,      off:!cd.includeSupv},
+          ]:[
+            {l:'충전기',        ex:ct.chargerExVAT, sub:ct.subsidyChargerEx, meta:chargerMeta},
+            {l:'스탠드폴',      ex:ct.standExVAT,   sub:ct.subsidyStandEx,   meta:standMeta},
+            {l:'전기공사비',    ex:ct.elecExVAT,    sub:ct.subsidyElecEx},
+            {l:'사용전검사비',  ex:ct.inspEx,        off:!cd.includeInsp},
+            {l:'전기안전점검비',ex:ct.safetyEx,      off:!cd.includeSafety},
+            {l:'한전불입금',    ex:ct.kepcoEx,       off:ct.kepcoEx===0, sub:ct.subsidyKepcoEx},
+            {l:'감리비',        ex:ct.supervEx,      off:!cd.includeSupv},
+          ]);
+        })().map(row=>{
+          const showSub=cd.subsidyApplied;
+          return (
+            <div key={row.l} style={{display:'grid',gridTemplateColumns:showSub?'1fr 120px 100px':'1fr 120px',gap:6,padding:'5px 0',borderBottom:'1px solid var(--bd)',alignItems:'center'}}>
+              <span style={{fontSize:11,color:row.off?'var(--ink3)':'var(--ink2)',display:'flex',alignItems:'center',gap:5,overflow:'hidden'}}>
+                <span style={{whiteSpace:'nowrap'}}>{row.l}{row.off?' (미포함)':''}</span>
+                {!row.off&&row.meta&&<span style={{fontSize:9,color:'var(--ink3)',fontFamily:'IBM Plex Mono',whiteSpace:'nowrap',flexShrink:0}}>{row.meta}</span>}
+              </span>
+              <span style={{fontSize:10,fontFamily:'IBM Plex Mono',textAlign:'right',color:row.off||!row.ex?'var(--ink3)':'var(--ink2)'}}>{!row.off&&row.ex>0?fWon(row.ex):'—'}</span>
+              {showSub&&<span style={{fontSize:10,fontFamily:'IBM Plex Mono',textAlign:'right',fontWeight:600,color:'var(--grn)'}}>{!row.off&&row.sub>0?fWon(row.sub):'—'}</span>}
+            </div>
+          );
+        })}
+        {/* 소계 + 부가세 + 합계를 행으로 */}
+        {(()=>{const totEx=activeCaseType==='C'?ct.totalCEx:ct.totalBEx;const totVT=activeCaseType==='C'?ct.totalCVT:ct.totalBVT;const totIn=activeCaseType==='C'?ct.totalCIn:ct.totalBIn;const cols=cd.subsidyApplied?'1fr 120px 100px':'1fr 120px';return(<>
+        <div style={{display:'grid',gridTemplateColumns:cols,gap:6,padding:'6px 0 4px',borderTop:'2px solid var(--bd)',marginTop:2}}>
+          <span style={{fontSize:11,fontWeight:600,color:'var(--ink2)'}}>공급가액 소계</span>
+          <span style={{fontSize:10,fontFamily:'IBM Plex Mono',textAlign:'right',fontWeight:600,color:'var(--ink2)'}}>{fWon(totEx)}</span>
+          {cd.subsidyApplied&&<span style={{fontSize:10,fontFamily:'IBM Plex Mono',textAlign:'right',fontWeight:700,color:'var(--grn)'}}>-{fWon(ct.subsidyAmt)}</span>}
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:cols,gap:6,padding:'4px 0'}}>
+          <span style={{fontSize:11,color:'var(--ink3)'}}>부가세 (10%)</span>
+          <span style={{fontSize:10,fontFamily:'IBM Plex Mono',textAlign:'right',color:'var(--ink3)'}}>{fWon(totVT)}</span>
+          {cd.subsidyApplied&&<span/>}
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:cols,gap:6,padding:'6px 0 3px',borderTop:'1px solid var(--bd)',background:'var(--accl)',margin:'0 -10px',padding:'6px 10px 4px',borderRadius:'0 0 6px 6px'}}>
+          <span style={{fontSize:12,fontWeight:700,color:'var(--acc)'}}>합계 (VAT포함)</span>
+          <span style={{fontSize:12,fontFamily:'IBM Plex Mono',textAlign:'right',fontWeight:700,color:'var(--acc)'}}>{fWon(totIn)}</span>
+          {cd.subsidyApplied&&<span/>}
+        </div>
+        </>);})()}
+        {/* 1기당 공사비 */}
+        {!cd.subsidyApplied&&ct.totalChargers>0&&(()=>{
+          const totEx=activeCaseType==='C'?ct.totalCEx:ct.totalBEx;
+          const perUnit=Math.round(totEx/ct.totalChargers);
+          return (
+            <div style={{marginTop:6,padding:'8px 10px',background:'var(--s2)',borderRadius:6,border:'1px solid var(--bd)'}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
+                <span style={{fontSize:11,fontWeight:600,color:'var(--ink2)'}}>1기당 공사비 ({ct.totalChargers}기 기준) <span style={{fontSize:8,color:'var(--org)',fontWeight:700}}>VAT별도</span></span>
+                <span style={{fontSize:12,fontFamily:'IBM Plex Mono',fontWeight:700,color:'var(--ink)'}}>{fWon(perUnit)}</span>
+              </div>
+              <div style={{fontSize:9,color:'var(--ink3)',fontFamily:'IBM Plex Mono',lineHeight:1.5}}>
+                = {fWon(totEx)} ÷ {ct.totalChargers}기
+              </div>
+            </div>
+          );
+        })()}
+        {/* 🏢 건물주 투자 박스 — 보조금 미신청 + 건물주 투자 모드 */}
+        {!cd.subsidyApplied&&cd.buildingInvestment&&(()=>{
+          const totEx=activeCaseType==='C'?ct.totalCEx:ct.totalBEx;
+          const fundEx=parseFloat(cd.buildingFundAmount)||0;
+          const marginEx=fundEx-totEx;
+          const marginPositive=marginEx>=0;
+          const marginRate=(parseFloat(cd.buildingMarginRate)||0)/100;
+          const recommendedFund=Math.round(totEx*(1+marginRate));
+          return (
+            <div style={{marginTop:8,padding:'8px 10px',background:'var(--orgd)',border:'1px solid var(--org2)',borderRadius:6}}>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6,gap:8,flexWrap:'wrap'}}>
+                <div style={{fontSize:11,fontWeight:700,color:'var(--org)'}}>🏢 건물측 투자 정산</div>
+                <div style={{display:'flex',alignItems:'center',gap:4}}>
+                  <span style={{fontSize:9,color:'var(--ink3)',fontWeight:600}}>참고 마진율</span>
+                  <input
+                    className="cp-input"
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.5"
+                    value={cd.buildingMarginRate||0}
+                    onChange={e=>set('buildingMarginRate',parseFloat(e.target.value)||0)}
+                    style={{width:48,fontSize:10,fontWeight:700,textAlign:'right',color:'var(--org)',padding:'2px 4px'}}
+                  />
+                  <span style={{fontSize:9,color:'var(--org)',fontWeight:700}}>%</span>
+                  <span style={{fontSize:9,color:'var(--ink3)',marginLeft:4}}>→ 권장 투자금</span>
+                  <span style={{fontSize:10,fontFamily:'IBM Plex Mono',color:'var(--ink2)',fontWeight:700}}>{fWon(recommendedFund)}</span>
+                </div>
+              </div>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'3px 0',fontSize:11}}>
+                <span style={{color:'var(--org)',fontWeight:600}}>건물측 투자금액 (입금)</span>
+                <span style={{fontFamily:'IBM Plex Mono',color:'var(--org)',fontWeight:700}}>+{fWon(fundEx)}</span>
+              </div>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'3px 0',fontSize:11}}>
+                <span style={{color:'var(--ink2)'}}>공사비 합계 (집행)</span>
+                <span style={{fontFamily:'IBM Plex Mono',color:'var(--ink2)',fontWeight:600}}>−{fWon(totEx)}</span>
+              </div>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'6px 0 2px',borderTop:'1px dashed var(--org2)',marginTop:3}}>
+                <span style={{fontSize:12,fontWeight:700,color:marginPositive?'var(--grn)':'var(--red)'}}>{marginPositive?'당사 마진 (차액)':'당사 추가 투자 (부족분)'} <span style={{fontSize:9,fontWeight:700,marginLeft:4}}>VAT별도</span></span>
+                <span style={{fontSize:13,fontFamily:'IBM Plex Mono',fontWeight:700,color:marginPositive?'var(--grn)':'var(--red)'}}>{marginPositive?'+':''}{fWon(Math.abs(marginEx))}</span>
+              </div>
+              {totEx>0&&<div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'2px 0 0',fontSize:10,color:'var(--ink3)'}}>
+                <span>{marginPositive?'실제 마진율 (공사비 대비)':'부족 비율 (공사비 대비)'}</span>
+                <span style={{fontFamily:'IBM Plex Mono',fontWeight:600,color:marginPositive?'var(--grn)':'var(--red)'}}>{marginPositive?'+':''}{(Math.abs(marginEx)/totEx*100).toFixed(1)}%</span>
+              </div>}
+              {/* 1기당 환산 — 충전기가 있을 때만 */}
+              {ct.totalChargers>0&&fundEx>0&&<div style={{marginTop:6,paddingTop:6,borderTop:'1px dashed var(--org2)'}}>
+                <div style={{fontSize:9,fontWeight:700,color:'var(--ink3)',textTransform:'uppercase',marginBottom:3}}>📐 1기당 환산 ({ct.totalChargers}기 기준) <span style={{fontSize:8,color:'var(--org)',fontWeight:700}}>VAT별도</span></div>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',padding:'2px 0',fontSize:10,gap:8}}>
+                  <div style={{display:'flex',flexDirection:'column'}}>
+                    <span style={{color:'var(--ink2)'}}>1기당 공사비</span>
+                    <span style={{fontSize:9,color:'var(--ink3)',fontFamily:'IBM Plex Mono'}}>= {fWon(totEx)} ÷ {ct.totalChargers}기</span>
+                  </div>
+                  <span style={{fontFamily:'IBM Plex Mono',fontWeight:600,color:'var(--ink2)'}}>{fWon(Math.round(totEx/ct.totalChargers))}</span>
+                </div>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',padding:'2px 0',fontSize:10,gap:8}}>
+                  <div style={{display:'flex',flexDirection:'column'}}>
+                    <span style={{color:marginPositive?'var(--grn)':'var(--red)',fontWeight:700}}>{marginPositive?'1기당 당사 마진':'1기당 당사 추가 투자'}</span>
+                    <span style={{fontSize:9,color:'var(--ink3)',fontFamily:'IBM Plex Mono'}}>= {marginPositive?'+':''}{fWon(Math.abs(marginEx))} ÷ {ct.totalChargers}기</span>
+                  </div>
+                  <span style={{fontFamily:'IBM Plex Mono',fontWeight:700,color:marginPositive?'var(--grn)':'var(--red)'}}>{marginPositive?'+':''}{fWon(Math.round(Math.abs(marginEx)/ct.totalChargers))}</span>
+                </div>
+              </div>}
+              {fundEx===0&&<div style={{marginTop:6,fontSize:10,color:'var(--ink3)',fontStyle:'italic'}}>※ 위 "투자 주체" 토글에서 건물측 투자금액을 입력해주세요.</div>}
+            </div>
+          );
+        })()}
+        </div>{/* /minWidth wrapper */}
+        </div>{/* /cost-detail-scroll */}
+        {/* Subsidy detail */}
+        {cd.subsidyApplied&&<>
+          <div style={{marginTop:8,padding:'8px 10px',background:'var(--grnd)',border:'1px solid var(--grn2)',borderRadius:6,fontSize:10,lineHeight:1.7}}>
+            <div style={{fontWeight:700,color:'var(--grn)',marginBottom:4,fontSize:11}}>💸 보조금 산정 ({ct.totalChargers}기)</div>
+            <div style={{color:'var(--ink2)'}}>
+              <span style={{fontWeight:600}}>수식:</span>
+              {ct.totalChargers===1&&' 1기 → 최대 220만원'}
+              {ct.totalChargers>1&&ct.totalChargers<=5&&` 1기×220만 + ${ct.totalChargers-1}기×200만 = 최대 ${fW(calcSubsidyMax(ct.totalChargers))}`}
+              {ct.totalChargers>=6&&` 1기×220만 + 4기×200만 + ${ct.totalChargers-5}기×180만 = 최대 ${fW(calcSubsidyMax(ct.totalChargers))}`}
+            </div>
+            <div style={{color:'var(--ink2)'}}>
+              <span style={{fontWeight:600}}>대상 공급가액 합계:</span> {fWon(ct.subsidyBaseEx)} × 50% = {fWon(Math.round(ct.subsidyBaseEx/2))}
+            </div>
+            <div style={{color:'var(--ink2)'}}>
+              <span style={{fontWeight:600}}>지급 가능액:</span>&nbsp;
+              {Math.round(ct.subsidyBaseEx/2)<=ct.subsidyAmt
+                ? <span>{fWon(ct.subsidyAmt)} <span style={{color:'var(--grn)',fontWeight:700}}>(한도 내 전액 수령 가능)</span></span>
+                : <span>{fWon(Math.round(ct.subsidyBaseEx/2))}이지만 최대 {fW(calcSubsidyMax(ct.totalChargers))} 한도 초과
+                    &nbsp;→&nbsp;<strong style={{color:'var(--grn)'}}>{fWon(ct.subsidyAmt)} 수령</strong>
+                    <span style={{color:'var(--red)',marginLeft:4}}>(초과분 {fWon(Math.round(ct.subsidyBaseEx/2)-ct.subsidyAmt)} 미지급)</span>
+                  </span>
+              }
+            </div>
+          </div>
+          {(()=>{const totEx=activeCaseType==='C'?ct.totalCEx:ct.totalBEx;return(<>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 0 0',borderTop:'1px solid var(--grn2)',marginTop:8}}>
+            <span style={{fontWeight:700,fontSize:12}}>순 공사비 (공사비 합계 - 보조금) <span style={{fontSize:9,color:'var(--org)',fontWeight:700,marginLeft:4}}>VAT별도</span></span>
+            <span style={{fontWeight:700,fontFamily:'IBM Plex Mono',color:'var(--org)',fontSize:13}}>{fWon(totEx-ct.subsidyAmt)}</span>
+          </div>
+          {ct.totalChargers>0&&(()=>{
+            const netEx=totEx-ct.subsidyAmt;
+            const perUnit=Math.round(netEx/ct.totalChargers);
+            return (
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',padding:'5px 0 0',fontSize:10,color:'var(--ink3)',gap:8}}>
+                <div style={{display:'flex',flexDirection:'column',gap:2,minWidth:0}}>
+                  <span>1기당 순 공사비 ({ct.totalChargers}기 기준) <span style={{fontSize:8,color:'var(--org)',fontWeight:700}}>VAT별도</span></span>
+                  <span style={{fontSize:9,color:'var(--ink3)',fontFamily:'IBM Plex Mono',lineHeight:1.4}}>= (공사비 합계 − 보조금) ÷ 충전기 수량</span>
+                  <span style={{fontSize:9,color:'var(--ink3)',fontFamily:'IBM Plex Mono',lineHeight:1.4}}>= {fWon(netEx)} ÷ {ct.totalChargers}기</span>
+                </div>
+                <span style={{fontFamily:'IBM Plex Mono',fontWeight:600,color:'var(--ink2)',flexShrink:0}}>{fWon(perUnit)}</span>
+              </div>
+            );
+          })()}
+          {/* 🏢 건물주 투자 박스 — 보조금 신청 + 건물주 투자 모드 */}
+          {cd.buildingInvestment&&(()=>{
+            const netEx=totEx-ct.subsidyAmt;
+            const fundEx=parseFloat(cd.buildingFundAmount)||0;
+            const marginEx=fundEx-netEx;
+            const marginPositive=marginEx>=0;
+            const marginRate=(parseFloat(cd.buildingMarginRate)||0)/100;
+            const recommendedFund=Math.round(netEx*(1+marginRate));
+            return (
+              <div style={{marginTop:8,padding:'8px 10px',background:'var(--orgd)',border:'1px solid var(--org2)',borderRadius:6}}>
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6,gap:8,flexWrap:'wrap'}}>
+                  <div style={{fontSize:11,fontWeight:700,color:'var(--org)'}}>🏢 건물측 투자 정산</div>
+                  <div style={{display:'flex',alignItems:'center',gap:4}}>
+                    <span style={{fontSize:9,color:'var(--ink3)',fontWeight:600}}>참고 마진율</span>
+                    <input
+                      className="cp-input"
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.5"
+                      value={cd.buildingMarginRate||0}
+                      onChange={e=>set('buildingMarginRate',parseFloat(e.target.value)||0)}
+                      style={{width:48,fontSize:10,fontWeight:700,textAlign:'right',color:'var(--org)',padding:'2px 4px'}}
+                    />
+                    <span style={{fontSize:9,color:'var(--org)',fontWeight:700}}>%</span>
+                    <span style={{fontSize:9,color:'var(--ink3)',marginLeft:4}}>→ 권장 투자금</span>
+                    <span style={{fontSize:10,fontFamily:'IBM Plex Mono',color:'var(--ink2)',fontWeight:700}}>{fWon(recommendedFund)}</span>
+                  </div>
+                </div>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'3px 0',fontSize:11}}>
+                  <span style={{color:'var(--org)',fontWeight:600}}>건물측 투자금액 (입금)</span>
+                  <span style={{fontFamily:'IBM Plex Mono',color:'var(--org)',fontWeight:700}}>+{fWon(fundEx)}</span>
+                </div>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'3px 0',fontSize:11}}>
+                  <span style={{color:'var(--ink2)'}}>순 공사비 (보조금 차감 후 집행)</span>
+                  <span style={{fontFamily:'IBM Plex Mono',color:'var(--ink2)',fontWeight:600}}>−{fWon(netEx)}</span>
+                </div>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'6px 0 2px',borderTop:'1px dashed var(--org2)',marginTop:3}}>
+                  <span style={{fontSize:12,fontWeight:700,color:marginPositive?'var(--grn)':'var(--red)'}}>{marginPositive?'당사 마진 (차액)':'당사 추가 투자 (부족분)'} <span style={{fontSize:9,fontWeight:700,marginLeft:4}}>VAT별도</span></span>
+                  <span style={{fontSize:13,fontFamily:'IBM Plex Mono',fontWeight:700,color:marginPositive?'var(--grn)':'var(--red)'}}>{marginPositive?'+':''}{fWon(Math.abs(marginEx))}</span>
+                </div>
+                {netEx>0&&<div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'2px 0 0',fontSize:10,color:'var(--ink3)'}}>
+                  <span>{marginPositive?'실제 마진율 (순 공사비 대비)':'부족 비율 (순 공사비 대비)'}</span>
+                  <span style={{fontFamily:'IBM Plex Mono',fontWeight:600,color:marginPositive?'var(--grn)':'var(--red)'}}>{marginPositive?'+':''}{(Math.abs(marginEx)/netEx*100).toFixed(1)}%</span>
+                </div>}
+                {/* 1기당 환산 — 충전기가 있을 때만 */}
+                {ct.totalChargers>0&&fundEx>0&&<div style={{marginTop:6,paddingTop:6,borderTop:'1px dashed var(--org2)'}}>
+                  <div style={{fontSize:9,fontWeight:700,color:'var(--ink3)',textTransform:'uppercase',marginBottom:3}}>📐 1기당 환산 ({ct.totalChargers}기 기준) <span style={{fontSize:8,color:'var(--org)',fontWeight:700}}>VAT별도</span></div>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',padding:'2px 0',fontSize:10,gap:8}}>
+                    <div style={{display:'flex',flexDirection:'column'}}>
+                      <span style={{color:'var(--ink2)'}}>1기당 순 공사비</span>
+                      <span style={{fontSize:9,color:'var(--ink3)',fontFamily:'IBM Plex Mono'}}>= {fWon(netEx)} ÷ {ct.totalChargers}기</span>
+                    </div>
+                    <span style={{fontFamily:'IBM Plex Mono',fontWeight:600,color:'var(--ink2)'}}>{fWon(Math.round(netEx/ct.totalChargers))}</span>
+                  </div>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',padding:'2px 0',fontSize:10,gap:8}}>
+                    <div style={{display:'flex',flexDirection:'column'}}>
+                      <span style={{color:marginPositive?'var(--grn)':'var(--red)',fontWeight:700}}>{marginPositive?'1기당 당사 마진':'1기당 당사 추가 투자'}</span>
+                      <span style={{fontSize:9,color:'var(--ink3)',fontFamily:'IBM Plex Mono'}}>= {marginPositive?'+':''}{fWon(Math.abs(marginEx))} ÷ {ct.totalChargers}기</span>
+                    </div>
+                    <span style={{fontFamily:'IBM Plex Mono',fontWeight:700,color:marginPositive?'var(--grn)':'var(--red)'}}>{marginPositive?'+':''}{fWon(Math.round(Math.abs(marginEx)/ct.totalChargers))}</span>
+                  </div>
+                </div>}
+                {fundEx===0&&<div style={{marginTop:6,fontSize:10,color:'var(--ink3)',fontStyle:'italic'}}>※ 위 "투자 주체" 토글에서 건물측 투자금액을 입력해주세요.</div>}
+              </div>
+            );
+          })()}
+          </>);})()}
+        </>}
+      </div>
+    </div>
+  </div>;
+}
+
+/* ══════════ COMPARE TAB ══════════ */
+
+
+function AddModal({onAdd,onClose}){
+  const [f,setF]=useState({name:'',address:'',region:'서울',aboveGround:'',underground:''});
+  const s=(k,v)=>setF(p=>({...p,[k]:v}));
+  return <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,.4)',zIndex:999,display:'flex',alignItems:'center',justifyContent:'center'}}
+    onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
+    <div style={{background:'#fff',borderRadius:10,padding:20,width:380,maxHeight:'80vh',overflow:'auto'}}>
+      <div style={{fontSize:14,fontWeight:700,marginBottom:12}}>현장 추가</div>
+      <div style={{display:'flex',flexDirection:'column',gap:8}}>
+        <div>
+          <div style={{fontSize:10,fontWeight:600,color:'var(--ink3)',marginBottom:3}}>현장명 *</div>
+          <input className="cp-input" value={f.name} onChange={e=>s('name',e.target.value)} placeholder="예: 서초힐스" style={{fontSize:11}}/>
+        </div>
+        <div>
+          <div style={{fontSize:10,fontWeight:600,color:'var(--ink3)',marginBottom:3}}>주소</div>
+          <input className="cp-input" value={f.address} onChange={e=>s('address',e.target.value)} placeholder="예: 서울시 서초구 서초대로 123" style={{fontSize:11}}/>
+        </div>
+        <div>
+          <div style={{fontSize:10,fontWeight:600,color:'var(--ink3)',marginBottom:3}}>지역</div>
+          <select className="cp-input" value={f.region} onChange={e=>s('region',e.target.value)} style={{fontSize:11}}>
+            {REGIONS.map(r=><option key={r} value={r}>{r}</option>)}
+          </select>
+        </div>
+        <div style={{display:'flex',gap:8}}>
+          <div style={{flex:1}}>
+            <div style={{fontSize:10,fontWeight:600,color:'var(--ink3)',marginBottom:3}}>지상 기수</div>
+            <input className="cp-input" type="number" min="0" value={f.aboveGround} onChange={e=>s('aboveGround',e.target.value)} style={{fontSize:11}}/>
+          </div>
+          <div style={{flex:1}}>
+            <div style={{fontSize:10,fontWeight:600,color:'var(--ink3)',marginBottom:3}}>지하 기수</div>
+            <input className="cp-input" type="number" min="0" value={f.underground} onChange={e=>s('underground',e.target.value)} style={{fontSize:11}}/>
+          </div>
+        </div>
+      </div>
+      <div style={{display:'flex',justifyContent:'flex-end',gap:6,marginTop:14}}>
+        <button onClick={onClose} style={{padding:'6px 14px',fontSize:11,border:'1px solid var(--bd)',borderRadius:5,background:'var(--s2)',cursor:'pointer',fontFamily:'inherit'}}>취소</button>
+        <button onClick={()=>{if(!f.name.trim())return alert('현장명을 입력하세요'); onAdd({name:f.name.trim(),address:f.address,region:f.region,aboveGround:parseInt(f.aboveGround)||0,underground:parseInt(f.underground)||0}); onClose();}}
+          style={{padding:'6px 14px',fontSize:11,border:'none',borderRadius:5,background:'var(--acc)',color:'#fff',cursor:'pointer',fontFamily:'inherit',fontWeight:600}}>추가</button>
+      </div>
+    </div>
+  </div>;
+}
+
+function App(){
+  const [sites,setSites]=useState(SITES0);
+  const [sid,setSid]=useState(1);
+  const [nid,setNid]=useState(10);
+  const [costMap,setCostMap]=useState({1:{...COST0,chargerItems:[...COST0.chargerItems]}});
+  const [dataLoaded,setDataLoaded]=useState(false);
+  const [showAdd,setShowAdd]=useState(false);
+  const [sbSearch,setSbSearch]=useState('');
+  const [cardScale,setCardScale]=useState(1);
+  const cardW = Math.round(420 * cardScale);
+  const nameFz = Math.round(13 * cardScale);
+  const metaFz = Math.round(11 * cardScale);
+  const padH = Math.round(8 * cardScale);
+  const padV = Math.round(10 * cardScale);
+  const [sbFilter,setSbFilter]=useState('전체');
+  const [checkedIds,setCheckedIds]=useState([]);
+  const [deleteMode,setDeleteMode]=useState(false);
+  const [editingSite,setEditingSite]=useState(null);
+  const updateSite = (patch) => setSites(ss=>ss.map(s=>s.id===sid?{...s,...patch}:s));
+
+  // Load data
+  window._onUserSelected = async ()=>{
+    const saved = await loadLS();
+    if(saved){
+      if(saved.sites) setSites(saved.sites);
+      if(saved.sid) setSid(saved.sid);
+      if(saved.nid) setNid(saved.nid);
+      if(saved.costMap) setCostMap(saved.costMap);
+    }
+    setDataLoaded(true);
+  };
+  useEffect(()=>{ if(_currentUser) window._onUserSelected(); },[]);
+
+  // Auto-save
+  useEffect(()=>{
+    if(!dataLoaded) return;
+    const t=setTimeout(()=>saveLS({sites,sid,nid,costMap}),800);
+    return ()=>clearTimeout(t);
+  },[sites,sid,nid,costMap,dataLoaded]);
+
+  // Firestore real-time sync
+  useEffect(()=>{
+    if(!_DOC) return;
+    const unsub = _DOC.onSnapshot(snap=>{
+      if(_isSavingToFirebase) return;
+      if(snap.exists){
+        const data=snap.data();
+        if(data.sites)setSites(data.sites);
+        if(data.costMap)setCostMap(data.costMap);
+      }
+    });
+    return ()=>unsub();
+  },[dataLoaded]);
+
+  const site = sites.find(s=>s.id===sid) || sites[0];
+  const cd = costMap[sid] || {...COST0,chargerItems:[...COST0.chargerItems]};
+  const ct = useMemo(()=>calcCostTotals(cd),[cd]);
+  const updCost = p => setCostMap(m=>({...m,[sid]:{...cd,...p}}));
+
+  function addSite(s){
+    const id=nid;
+    const ns=[...sites,{...s,id}];
+    setSites(ns); setSid(id); setNid(nid+1);
+  }
+  function delSites(ids){
+    if(!ids.length)return;
+    const ns=sites.filter(s=>!ids.includes(s.id));
+    if(!ns.length) return alert('최소 1개 현장이 필요합니다.');
+    setSites(ns);
+    if(ids.includes(sid)) setSid(ns[0].id);
+    const nc={...costMap}; ids.forEach(id=>delete nc[id]);
+    setCostMap(nc); setCheckedIds([]); setDeleteMode(false);
+  }
+  function copySite(){
+    const orig=sites.find(s=>s.id===sid);
+    if(!orig)return;
+    const id=nid;
+    const ns=[...sites,{...orig,id,name:orig.name+' (복사)'}];
+    const origCost=costMap[sid]||COST0;
+    setSites(ns); setSid(id); setNid(nid+1);
+    setCostMap(m=>({...m,[id]:JSON.parse(JSON.stringify(origCost))}));
+  }
+
+  // Filter sites
+  const filteredSites = sites.filter(s=>{
+    const rgMatch = sbFilter==='전체' || s.region===sbFilter;
+    const searchMatch = !sbSearch || s.name.toLowerCase().includes(sbSearch.toLowerCase()) || (s.address||'').toLowerCase().includes(sbSearch.toLowerCase());
+    return rgMatch && searchMatch;
+  });
+
+  const totalChargers = sites.reduce((s,site)=>{
+    const c=costMap[site.id]||COST0;
+    return s + (c.chargerItems||[]).reduce((s2,i)=>s2+(i.qty||0),0);
+  },0);
+
+  // Migration check
+  const [migrated,setMigrated]=useState(false);
+  const doMigrate = async ()=>{
+    if(!confirm('기존 시뮬레이션 데이터에서 31개 현장을 가져옵니다. 현재 데이터가 덮어씌워집니다. 계속하시겠습니까?')) return;
+    setSites(MIGRATION_DATA.sites);
+    setSid(MIGRATION_DATA.sid);
+    setNid(MIGRATION_DATA.nid);
+    setCostMap(MIGRATION_DATA.costMap);
+    setMigrated(true);
+    alert('마이그레이션 완료! ' + MIGRATION_DATA.sites.length + '개 현장이 로드되었습니다.');
+  };
+
+  return <div className="layout" style={{height:'100vh',display:'flex',flexDirection:'column'}}>
+    {/* Header */}
+    <div className="hdr">
+      <div className="hdr-logo">
+        <span>🔧 EV 충전기 시공관리</span>
+        <div className="hdr-sep"></div>
+        <span className="hdr-sub">Construction Manager</span>
+      </div>
+      <div style={{display:'flex',alignItems:'center',gap:5}}>
+        <span style={{fontSize:9,color:'rgba(255,255,255,.35)'}}>💾 자동저장</span>
+        <button onClick={()=>exportData({sites,sid,nid,costMap})}
+          style={{background:'none',border:'1px solid rgba(255,255,255,.25)',borderRadius:4,padding:'3px 9px',fontSize:10,color:'rgba(255,255,255,.75)',cursor:'pointer',fontFamily:'inherit',fontWeight:600}}>⬇ 백업</button>
+        <button onClick={()=>importData(data=>{ setSites(data.sites); setSid(data.sid||data.sites[0]?.id||1); setNid(data.nid||100); setCostMap(data.costMap); })}
+          style={{background:'rgba(255,255,255,.12)',border:'1px solid rgba(255,255,255,.25)',borderRadius:4,padding:'3px 9px',fontSize:10,color:'rgba(255,255,255,.9)',cursor:'pointer',fontFamily:'inherit',fontWeight:600}}>⬆ 복원</button>
+        <button onClick={doMigrate}
+          style={{background:'rgba(245,158,11,.2)',border:'1px solid rgba(245,158,11,.5)',borderRadius:4,padding:'3px 9px',fontSize:10,color:'rgba(245,158,11,.9)',cursor:'pointer',fontFamily:'inherit',fontWeight:600}}>📥 기존 데이터 이관</button>
+        <span className="hdr-badge">CONSTRUCTION</span>
+      </div>
+    </div>
+
+    <div style={{display:'flex',flex:1,overflow:'hidden'}}>
+      {/* Sidebar */}
+      <aside className="sb" style={{width:cardW}}>
+        <div className="sb-sec" style={{display:'flex',flexDirection:'column',gap:5}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+            <div className="sb-label" style={{lineHeight:1.3}}>현장<br/>목록</div>
+            <div style={{display:'flex',gap:4}}>
+              <button onClick={()=>setShowAdd(true)} style={{padding:'4px 8px',fontSize:10,fontWeight:600,background:'var(--accl)',border:'1px solid var(--acc)',borderRadius:4,color:'var(--acc)',cursor:'pointer',fontFamily:'inherit',display:'flex',flexDirection:'column',alignItems:'center',gap:1,lineHeight:1.2}}>
+                <span style={{fontSize:13}}>+</span><span>추가</span>
+              </button>
+              <button onClick={copySite} style={{padding:'4px 8px',fontSize:10,fontWeight:600,background:'var(--orgd)',border:'1px solid var(--org2)',borderRadius:4,color:'var(--org)',cursor:'pointer',fontFamily:'inherit',display:'flex',flexDirection:'column',alignItems:'center',gap:1,lineHeight:1.2}}>
+                <span style={{fontSize:13}}>⧉</span><span>복사</span>
+              </button>
+              <button onClick={()=>{if(deleteMode&&checkedIds.length)delSites(checkedIds);else{setDeleteMode(!deleteMode);setCheckedIds([]);}}} style={{padding:'4px 8px',fontSize:10,fontWeight:600,background:deleteMode?'var(--red)':'var(--redd)',border:`1px solid ${deleteMode?'var(--red)':'var(--red2)'}`,borderRadius:4,color:deleteMode?'#fff':'var(--red)',cursor:'pointer',fontFamily:'inherit',display:'flex',flexDirection:'column',alignItems:'center',gap:1,lineHeight:1.2}}>
+                <span style={{fontSize:13}}>−</span><span>{deleteMode?(checkedIds.length?'확인':'취소'):'삭제'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Filter & Search */}
+        <div style={{padding:'0 8px 8px',display:'flex',flexDirection:'column',gap:5,borderBottom:'1px solid var(--bd)'}}>
+          <select style={{background:'var(--s2)',border:'1px solid var(--bd)',borderRadius:4,padding:'4px 6px',fontSize:10,color:'var(--ink)',fontFamily:'inherit',outline:'none',width:'100%'}}
+            value={sbFilter} onChange={e=>setSbFilter(e.target.value)}>
+            <option value="전체">전체 지역</option>
+            {REGIONS.map(r=><option key={r} value={r}>{r}</option>)}
+          </select>
+          <div style={{display:'flex',alignItems:'center',gap:4}}>
+            <button onClick={()=>setCardScale(s=>Math.max(0.7,+(s-0.1).toFixed(1)))} style={{width:28,height:24,fontSize:14,fontWeight:700,border:'1px solid var(--bd)',borderRadius:4,background:'var(--s2)',cursor:'pointer',color:'var(--ink)',fontFamily:'inherit',display:'flex',alignItems:'center',justifyContent:'center'}}>−</button>
+            <span style={{fontSize:9,color:'var(--ink3)',fontWeight:600,minWidth:28,textAlign:'center'}}>{Math.round(cardScale*100)}%</span>
+            <button onClick={()=>setCardScale(s=>Math.min(1.5,+(s+0.1).toFixed(1)))} style={{width:28,height:24,fontSize:14,fontWeight:700,border:'1px solid var(--bd)',borderRadius:4,background:'var(--s2)',cursor:'pointer',color:'var(--ink)',fontFamily:'inherit',display:'flex',alignItems:'center',justifyContent:'center'}}>+</button>
+          </div>
+          <div style={{position:'relative'}}>
+            <input placeholder="🔍 현장명 검색" value={sbSearch} onChange={e=>setSbSearch(e.target.value)}
+              style={{width:'100%',padding:'5px 28px 5px 8px',fontSize:10,border:'1px solid var(--bd)',borderRadius:5,background:'var(--s2)',color:'var(--ink)',fontFamily:'inherit',outline:'none',boxSizing:'border-box'}}/>
+            {sbSearch&&<button onClick={()=>setSbSearch('')}
+              style={{position:'absolute',right:4,top:'50%',transform:'translateY(-50%)',background:'none',border:'none',cursor:'pointer',fontSize:12,color:'var(--ink3)',padding:'0 2px',lineHeight:1}}>×</button>}
+          </div>
+        </div>
+
+        {/* Site list */}
+        <div className="sb-list">
+          {filteredSites.map(s=>{
+            const c=costMap[s.id]||COST0;
+            const total=(c.chargerItems||[]).reduce((s2,i)=>s2+(i.qty||0),0);
+            return <div key={s.id} className={`sitem ${s.id===sid?'active':''}`}
+              style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',padding:`${padH}px ${padV}px`}}
+              onClick={()=>{if(!deleteMode)setSid(s.id);}}>
+              {deleteMode&&<div onClick={e=>{e.stopPropagation();setCheckedIds(p=>p.includes(s.id)?p.filter(x=>x!==s.id):[...p,s.id]);}}
+                style={{width:16,height:16,borderRadius:3,border:`2px solid ${checkedIds.includes(s.id)?'var(--red)':'var(--bd)'}`,background:checkedIds.includes(s.id)?'var(--red)':'transparent',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                {checkedIds.includes(s.id)&&<span style={{color:'#fff',fontSize:9,fontWeight:700}}>✓</span>}
+              </div>}
+              <div style={{flex:1,minWidth:0}}>
+                <div className="sitem-name" style={{fontSize:nameFz}}>{s.name}</div>
+                <div className="sitem-meta" style={{fontSize:metaFz}}>{s.region} · {total}기</div>
+              </div>
+            </div>;
+          })}
+        </div>
+
+        <div className="sb-foot">
+          <div className="sfstat"><div className="n">{filteredSites.length}</div><div className="l">현장</div></div>
+          <div className="sfstat"><div className="n">{totalChargers}</div><div className="l">총 기수</div></div>
+        </div>
+      </aside>
+
+      {/* Main content */}
+      <main className="main" style={{flex:1,overflow:'auto'}}>
+        {/* Topbar */}
+        <div className="topbar">
+          <div className="topbar-row1">
+            <span className="site-name">{site.name}</span>
+            <span className="site-loc">{site.address||site.region}</span>
+            <button onClick={()=>setEditingSite({...site})} className="edit-btn" style={{position:'static',marginLeft:4}}>편집</button>
+            <div className="charger-tags">
+              {(cd.chargerItems||[]).filter(i=>i.qty>0).map((item,idx)=>
+                <span key={idx} className="ctag">{item.kw}kW {item.qty}기({item.location})</span>
+              )}
+            </div>
+          </div>
+          <div className="kpi-strip">
+            <div className="kpi" style={{flex:1.1}}>
+              <div className="kl">총 충전기</div>
+              <div className="kv">{ct.totalChargers}기</div>
+
+            </div>
+            <div className="kpi acc" style={{flex:1.2}}>
+              <div className="kl">공사비 (VAT포함)</div>
+              <div className="kv">{fW(ct.totalCMan)}</div>
+              <div className="ks">공급가액 {fW(ct.totalCMan - toMan(ct.totalCVT))}</div>
+            </div>
+            {cd.subsidyApplied && <div className="kpi grn">
+              <div className="kl">보조금 차감 후</div>
+              <div className="kv">{fW(ct.netCMan)}</div>
+              <div className="ks">보조금 {fW(toMan(ct.subsidyAmt))}</div>
+            </div>}
+            <div className="kpi">
+              <div className="kl">계약전력</div>
+              <div className="kv" style={{fontSize:11}}>{cd.contractKW||mergePowerPoints(cd.powerPoints)||0}kW</div>
+            </div>
+          </div>
+        </div>
+
+        {/* CostTab directly rendered */}
+        <div className="content" style={{padding:12}}>
+          <CostTab site={site} cd={cd} sm={{}} updCost={updCost}/>
+        </div>
+      </main>
+    </div>
+
+    {editingSite && <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,.4)',zIndex:999,display:'flex',alignItems:'center',justifyContent:'center'}}
+      onClick={e=>{if(e.target===e.currentTarget)setEditingSite(null);}}>
+      <div style={{background:'#fff',borderRadius:10,padding:20,width:380,maxHeight:'80vh',overflow:'auto'}}>
+        <div style={{fontSize:14,fontWeight:700,marginBottom:12}}>현장 정보 편집</div>
+        <div style={{display:'flex',flexDirection:'column',gap:8}}>
+          <div>
+            <div style={{fontSize:10,fontWeight:600,color:'var(--ink3)',marginBottom:3}}>현장명</div>
+            <input className="cp-input" value={editingSite.name||''} onChange={e=>setEditingSite(p=>({...p,name:e.target.value}))} style={{fontSize:11}}/>
+          </div>
+          <div>
+            <div style={{fontSize:10,fontWeight:600,color:'var(--ink3)',marginBottom:3}}>주소</div>
+            <input className="cp-input" value={editingSite.address||''} onChange={e=>setEditingSite(p=>({...p,address:e.target.value}))} style={{fontSize:11}}/>
+          </div>
+          <div>
+            <div style={{fontSize:10,fontWeight:600,color:'var(--ink3)',marginBottom:3}}>지역</div>
+            <select className="cp-input" value={editingSite.region||'서울'} onChange={e=>setEditingSite(p=>({...p,region:e.target.value}))} style={{fontSize:11}}>
+              {REGIONS.map(r=><option key={r} value={r}>{r}</option>)}
+            </select>
+          </div>
+
+        </div>
+        <div style={{display:'flex',justifyContent:'flex-end',gap:6,marginTop:14}}>
+          <button onClick={()=>setEditingSite(null)} style={{padding:'6px 14px',fontSize:11,border:'1px solid var(--bd)',borderRadius:5,background:'var(--s2)',cursor:'pointer',fontFamily:'inherit'}}>취소</button>
+          <button onClick={()=>{updateSite(editingSite);setEditingSite(null);}}
+            style={{padding:'6px 14px',fontSize:11,border:'none',borderRadius:5,background:'var(--acc)',color:'#fff',cursor:'pointer',fontFamily:'inherit',fontWeight:600}}>저장</button>
+        </div>
+      </div>
+    </div>}
+
+    {showAdd && <AddModal onAdd={addSite} onClose={()=>setShowAdd(false)}/>}
+  </div>;
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+<script>
+window._appLoaded = true;
+// 사용자 선택 비활성화 — 자동 로드
+if(window._onUserSelected) window._onUserSelected();
+</script>
+</body></html>
