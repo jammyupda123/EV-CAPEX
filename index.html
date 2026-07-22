@@ -628,8 +628,20 @@ async function loadLS(){
   console.log('❌ 저장된 데이터 없음');
   return null;
 }
+function stripUndefined(obj){
+  if(Array.isArray(obj)) return obj.map(stripUndefined);
+  if(obj && typeof obj==='object'){
+    const out={};
+    for(const[k,v]of Object.entries(obj)){
+      if(v!==undefined) out[k]=stripUndefined(v);
+    }
+    return out;
+  }
+  return obj;
+}
 let _saveStatus = 'idle'; // idle, saving, saved, error
 async function saveLS(d){
+  d = stripUndefined(d);
   try{ localStorage.setItem(LS_KEY,JSON.stringify(d)); }catch(e){}
   if(!_DOC){ _saveStatus='saved'; if(window._onSaveStatus)window._onSaveStatus('saved'); return; }
   try{
