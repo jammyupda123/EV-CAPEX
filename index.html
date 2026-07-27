@@ -586,13 +586,14 @@ function calcCostTotals(cd) {
   const totalCEx=chargerExVAT+standExVAT+canopyExVAT+elecExVAT+legalCostEx;
   const totalCVT=Math.round(totalCEx*.1);
   const totalCIn=totalCEx+totalCVT;
-  const subsidyBaseEx=chargerExVAT+standExVAT+canopyExVAT+elecExVAT+kepcoEx;
-  const subsidyChargerEx=Math.round(chargerExVAT/2);
-  const subsidyStandEx=Math.round(standExVAT/2);
-  const subsidyCanopyEx=Math.round(canopyExVAT/2);
-  const subsidyElecEx=Math.round(elecExVAT/2);
-  const subsidyKepcoEx=Math.round(kepcoEx/2);
   const subsidyQty=(cd.subsidyQty!=null&&cd.subsidyQty>=0)?cd.subsidyQty:totalChargers;
+  const subsidyRatio=totalChargers>0?subsidyQty/totalChargers:0;
+  const subsidyBaseEx=Math.round((chargerExVAT+standExVAT+canopyExVAT+elecExVAT+kepcoEx)*subsidyRatio);
+  const subsidyChargerEx=Math.round(chargerExVAT*subsidyRatio/2);
+  const subsidyStandEx=Math.round(standExVAT*subsidyRatio/2);
+  const subsidyCanopyEx=Math.round(canopyExVAT*subsidyRatio/2);
+  const subsidyElecEx=Math.round(elecExVAT*subsidyRatio/2);
+  const subsidyKepcoEx=Math.round(kepcoEx*subsidyRatio/2);
   const subsidyAmt=cd.subsidyApplied?Math.round(calcSubsidy(subsidyBaseEx,subsidyQty)*10000):0;
   const subsidyC=subsidyAmt;
   const netCWon=totalCIn+inspectionInc+insuranceInc+(parseFloat(cd.elecMgrFee)||0)*inspCnt-subsidyC;
@@ -1354,9 +1355,9 @@ function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
             <div style={{fontWeight:700,color:'var(--grn)',marginBottom:4,fontSize:11}}>💸 보조금 산정 ({ct.subsidyQty}기 대상)</div>
             <div style={{color:'var(--ink2)'}}>
               <span style={{fontWeight:600}}>수식:</span>
-              {ct.totalChargers===1&&' 1기 → 최대 220만원'}
-              {ct.totalChargers>1&&ct.totalChargers<=5&&` 1기×220만 + ${ct.totalChargers-1}기×200만 = 최대 ${fW(calcSubsidyMax(ct.totalChargers))}`}
-              {ct.totalChargers>=6&&` 1기×220만 + 4기×200만 + ${ct.totalChargers-5}기×180만 = 최대 ${fW(calcSubsidyMax(ct.totalChargers))}`}
+              {ct.subsidyQty===1&&' 1기 → 최대 220만원'}
+              {ct.subsidyQty>1&&ct.subsidyQty<=5&&` 1기×220만 + ${ct.subsidyQty-1}기×200만 = 최대 ${fW(calcSubsidyMax(ct.subsidyQty))}`}
+              {ct.subsidyQty>=6&&` 1기×220만 + 4기×200만 + ${ct.subsidyQty-5}기×180만 = 최대 ${fW(calcSubsidyMax(ct.subsidyQty))}`}
             </div>
             <div style={{color:'var(--ink2)'}}>
               <span style={{fontWeight:600}}>대상 공급가액 합계:</span> {fWon(ct.subsidyBaseEx)} × 50% = {fWon(Math.round(ct.subsidyBaseEx/2))}
@@ -1365,7 +1366,7 @@ function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
               <span style={{fontWeight:600}}>지급 가능액:</span>&nbsp;
               {Math.round(ct.subsidyBaseEx/2)<=ct.subsidyAmt
                 ? <span>{fWon(ct.subsidyAmt)} <span style={{color:'var(--grn)',fontWeight:700}}>(한도 내 전액 수령 가능)</span></span>
-                : <span>{fWon(Math.round(ct.subsidyBaseEx/2))}이지만 최대 {fW(calcSubsidyMax(ct.totalChargers))} 한도 초과
+                : <span>{fWon(Math.round(ct.subsidyBaseEx/2))}이지만 최대 {fW(calcSubsidyMax(ct.subsidyQty))} 한도 초과
                     &nbsp;→&nbsp;<strong style={{color:'var(--grn)'}}>{fWon(ct.subsidyAmt)} 수령</strong>
                     <span style={{color:'var(--red)',marginLeft:4}}>(초과분 {fWon(Math.round(ct.subsidyBaseEx/2)-ct.subsidyAmt)} 미지급)</span>
                   </span>
