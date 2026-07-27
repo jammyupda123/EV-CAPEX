@@ -514,7 +514,7 @@ const COST0={
   includeInsp:false, includeSafety:true, includeKepco:true, includeSupv:true,
   includeElecMgr:true, includeInspection:true, includeInsurance:true,
   elecMgrFee:0, inspectionCount:1,
-  subsidyApplied:false,subsidyQty:null,subsidyOverrides:{},
+  subsidyApplied:false,subsidyQty:null,subsidyOverrides:{},actualChargerPrice:650000,
   buildingInvestment:false, buildingFundAmount:0, buildingMarginRate:15,
   chargerItems:[{id:1,kw:7,model:'HEV-S1007A',location:'옥내',qty:0,unitPrice:0}],
   standQty:0,standUnitPrice:0,
@@ -587,20 +587,34 @@ function calcCostTotals(cd) {
   const totalCEx=chargerExVAT+standExVAT+canopyExVAT+elecExVAT+legalCostEx;
   const totalCVT=Math.round(totalCEx*.1);
   const totalCIn=totalCEx+totalCVT;
-  const subsidyQty=(cd.subsidyQty!=null&&cd.subsidyQty>=0)?cd.subsidyQty:totalChargers;
   const so=cd.subsidyOverrides||{};
-  const subChargerBase=so.charger!=null?so.charger:chargerExVAT;
-  const subStandBase=so.stand!=null?so.stand:standExVAT;
-  const subCanopyBase=so.canopy!=null?so.canopy:canopyExVAT;
-  const subElecBase=so.elec!=null?so.elec:elecExVAT;
-  const subKepcoBase=so.kepco!=null?so.kepco:kepcoEx;
+  const standTotalQty=cd.standQty||0;
+  const canopyTotalQty=cd.canopyQty||0;
+  const ciSubs=(cd.chargerItems||[]).map((item,idx)=>{
+    const q=item.qty||0;const sq=so['ci_'+idx]!=null?Math.min(so['ci_'+idx],q):q;
+    return {base:(item.unitPrice||0)*sq, qty:sq};
+  });
+  const eiSubs=(cd.elecItems||[]).map((item,idx)=>{
+    const q=parseFloat(item.qty)||0;const sq=so['ei_'+idx]!=null?Math.min(so['ei_'+idx],q):q;
+    return {base:Math.round((parseFloat(item.unitPrice)||0)*sq), qty:sq};
+  });
+  const subChargerBase=ciSubs.reduce((s,c)=>s+c.base,0);
+  const subSQ=so.stand!=null?Math.min(so.stand,standTotalQty):standTotalQty;
+  const subNQ=so.canopy!=null?Math.min(so.canopy,canopyTotalQty):canopyTotalQty;
+  const subStandBase=standTotalQty>0?Math.round(standExVAT*subSQ/standTotalQty):0;
+  const subCanopyBase=canopyTotalQty>0?Math.round(canopyExVAT*subNQ/canopyTotalQty):0;
+  const subElecBase=eiSubs.reduce((s,e)=>s+e.base,0);
+  const subKepcoBase=kepcoEx;
   const subsidyChargerEx=Math.round(subChargerBase/2);
   const subsidyStandEx=Math.round(subStandBase/2);
   const subsidyCanopyEx=Math.round(subCanopyBase/2);
   const subsidyElecEx=Math.round(subElecBase/2);
   const subsidyKepcoEx=Math.round(subKepcoBase/2);
   const subsidyBaseEx=subChargerBase+subStandBase+subCanopyBase+subElecBase+subKepcoBase;
+  const subsidyQty=ciSubs.reduce((s,c)=>s+c.qty,0);
   const subsidyAmt=cd.subsidyApplied?Math.round(calcSubsidy(subsidyBaseEx,subsidyQty)*10000):0;
+  const ciSubDetails=ciSubs;
+  const eiSubDetails=eiSubs;
   const subsidyC=subsidyAmt;
   const netCWon=totalCIn+inspectionInc+insuranceInc+(parseFloat(cd.elecMgrFee)||0)*inspCnt-subsidyC;
   return {
@@ -609,7 +623,7 @@ function calcCostTotals(cd) {
     inspectionInc,insuranceInc,totalChargers,subsidyQty,inspCnt,
     totalBEx,totalBVT,totalBIn,totalCEx,totalCVT,totalCIn,
     subsidyBaseEx,subsidyChargerEx,subsidyStandEx,subsidyCanopyEx,subsidyElecEx,subsidyKepcoEx,
-    subsidyAmt,subsidyC,netCWon,
+    subsidyAmt,subsidyC,netCWon,ciSubDetails,eiSubDetails,
     totalBMan:toMan(totalBIn),totalCMan:toMan(totalCIn),netCMan:toMan(netCWon),
   };
 }
@@ -927,21 +941,7 @@ function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
               <button className={`tog ${!cd.subsidyApplied?'on':''}`} onClick={()=>set('subsidyApplied',false)}>미신청 (0%)</button>
               <button className={`tog ${cd.subsidyApplied?'on-grn':''}`} onClick={()=>set('subsidyApplied',true)}>신청 (50% 지원)</button>
             </div>
-            {cd.subsidyApplied&&<div style={{marginTop:6}}>
-              <div style={{fontSize:10,color:'var(--grn)',fontWeight:600,marginBottom:5}}>총 투자비의 50% 차감</div>
-              <div style={{display:'flex',alignItems:'center',gap:6,padding:'5px 8px',background:'var(--s2)',borderRadius:5,border:'1px solid var(--bd)'}}>
-                <span style={{fontSize:10,color:'var(--ink3)',whiteSpace:'nowrap'}}>보조금 대상</span>
-                <div style={{display:'flex',alignItems:'center',gap:4}}>
-                  <input type="number" min="0" max={ct.totalChargers} value={cd.subsidyQty!=null?cd.subsidyQty:ct.totalChargers}
-                    onChange={e=>{const v=parseInt(e.target.value); set('subsidyQty',isNaN(v)?null:Math.min(v,ct.totalChargers));}}
-                    style={{width:45,padding:'3px 5px',fontSize:11,fontWeight:700,border:'1px solid var(--bd)',borderRadius:4,textAlign:'center',fontFamily:'IBM Plex Mono',background:'#fff',color:'var(--ink)'}}/>
-                  <span style={{fontSize:10,color:'var(--ink3)'}}>/</span>
-                  <span style={{fontSize:10,color:'var(--ink3)'}}>{ct.totalChargers}기</span>
-                </div>
-                {cd.subsidyQty!=null&&cd.subsidyQty!==ct.totalChargers&&<span style={{fontSize:9,color:'var(--org)',fontWeight:600}}>({ct.totalChargers-cd.subsidyQty}기 제외)</span>}
-                {cd.subsidyQty!=null&&<button onClick={()=>set('subsidyQty',null)} style={{fontSize:9,color:'var(--ink3)',background:'none',border:'none',cursor:'pointer',textDecoration:'underline',fontFamily:'inherit',padding:0}}>전체로 초기화</button>}
-              </div>
-            </div>}
+            {cd.subsidyApplied&&<div style={{marginTop:4,fontSize:10,color:'var(--grn)',fontWeight:600}}>총 투자비의 50% 차감 (대상수량은 공사비 상세에서 설정)</div>}
           </div>
         </div>
 
@@ -1163,7 +1163,7 @@ function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
                   <div className="ct-sub" style={{color:'var(--org)'}}>VAT별도 · 건물측 입금</div>
                 </div>
                 <div>
-                  <div className="ct-label" style={{fontSize:11}}>{activeCaseType==='C'?(cd.subsidyApplied?'순 공사비 (보조금 차감)':'Case C 공사비'):activeCaseType==='N'?'신규 공사비':'Case '+activeCaseType+' 공사비'}</div>
+                  <div className="ct-label" style={{fontSize:11}}>{'총 공사비'}</div>
                   <div className="ct-val" style={{fontSize:18,color:'#fff'}}>{fW(toMan(billBase))}</div>
                   <div className="ct-sub">매입 원가 · VAT별도</div>
                 </div>
@@ -1180,7 +1180,7 @@ function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
           return activeCaseType==='C'
             ?<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
                 <div>
-                  <div className="ct-label" style={{fontSize:11}}>Case C 총 공사비</div>
+                  <div className="ct-label" style={{fontSize:11}}>총 공사비</div>
                   <div className="ct-val" style={{fontSize:22}}>{fW(toMan(ct.totalCEx))}</div>
                   <div className="ct-sub">VAT 별도</div>
                 </div>
@@ -1191,7 +1191,7 @@ function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
                 </div>
               </div>
             :<div>
-                <div className="ct-label" style={{fontSize:11}}>{activeCaseType==='N'?'신규계약':'Case '+activeCaseType} 총 공사비</div>
+                <div className="ct-label" style={{fontSize:11}}>'총 공사비'</div>
                 <div className="ct-val" style={{fontSize:22}}>{fW(toMan(ct.totalBEx))}</div>
                 <div className="ct-sub">VAT 별도</div>
               </div>;
@@ -1201,7 +1201,7 @@ function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
       {/* Cost detail card */}
       <div className="card">
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
-          <div className="card-title" style={{marginBottom:0}}>📋 {activeCaseType==='C'?'Case C':activeCaseType==='N'?'신규계약':'Case '+activeCaseType} 공사비 상세</div>
+          <div className="card-title" style={{marginBottom:0}}>📋 공사비 상세</div>
           {setDetailWidth&&<div style={{display:'flex',alignItems:'center',gap:3}}>
             <span style={{fontSize:8,color:'var(--ink3)'}}>폭</span>
             <button onClick={()=>setDetailWidth(w=>Math.max(40,w-10))} style={{width:22,height:20,fontSize:12,fontWeight:700,border:'1px solid var(--bd)',borderRadius:3,background:'var(--s2)',cursor:'pointer',color:'var(--ink)',fontFamily:'inherit',display:'flex',alignItems:'center',justifyContent:'center'}}>−</button>
@@ -1219,47 +1219,99 @@ function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
           {cd.subsidyApplied&&<div style={{fontSize:9,fontWeight:700,color:'var(--ink3)',textAlign:'right'}}>보조금</div>}
         </div>
         {(()=>{
-          const chargerMeta=(()=>{const items=cd.chargerItems||[];const tq=items.reduce((s,i)=>s+(i.qty||0),0);if(!tq)return'';const ps=[...new Set(items.map(i=>i.unitPrice||0))];return ps.length===1?`${tq}기 · ${fWon(ps[0])}`:`${tq}기 · 혼합단가`;})();
+          const showSub=cd.subsidyApplied;
+          const cols=showSub?'1fr 110px 56px 95px':'1fr 120px';
+          const so=cd.subsidyOverrides||{};
+          const items=cd.chargerItems||[];
+          const elecItems=cd.elecItems||[];
           const standMeta=(cd.standQty||0)>0?`${cd.standQty}개 · ${fWon(cd.standUnitPrice||0)}`:'';
           const canopyMeta=(cd.canopyQty||0)>0?`${cd.canopyQty}개 · ${fWon(cd.canopyUnitPrice||0)}`:'';
-          return (activeCaseType==='C'?[
-            {l:'충전기',        ex:ct.chargerExVAT, sub:ct.subsidyChargerEx, meta:chargerMeta, ok:'charger'},
-            {l:'스탠드폴',      ex:ct.standExVAT,   sub:ct.subsidyStandEx,   meta:standMeta, ok:'stand'},
-            {l:'캐노피',        ex:ct.canopyExVAT,  sub:ct.subsidyCanopyEx,  meta:canopyMeta, ok:'canopy'},
-            {l:'전기공사비',    ex:ct.elecExVAT,    sub:ct.subsidyElecEx, ok:'elec'},
-            {l:'사용전검사비',  ex:ct.inspEx,        off:!cd.includeInsp},
-            {l:'전기안전점검비',ex:ct.safetyEx,      off:!cd.includeSafety},
-            {l:'한전불입금',    ex:ct.kepcoEx,       off:ct.kepcoEx===0, sub:ct.subsidyKepcoEx, ok:'kepco'},
-            {l:'감리비',        ex:ct.supervEx,      off:!cd.includeSupv},
-          ]:[
-            {l:'충전기',        ex:ct.chargerExVAT, sub:ct.subsidyChargerEx, meta:chargerMeta, ok:'charger'},
-            {l:'스탠드폴',      ex:ct.standExVAT,   sub:ct.subsidyStandEx,   meta:standMeta, ok:'stand'},
-            {l:'전기공사비',    ex:ct.elecExVAT,    sub:ct.subsidyElecEx, ok:'elec'},
-            {l:'사용전검사비',  ex:ct.inspEx,        off:!cd.includeInsp},
-            {l:'전기안전점검비',ex:ct.safetyEx,      off:!cd.includeSafety},
-            {l:'한전불입금',    ex:ct.kepcoEx,       off:ct.kepcoEx===0, sub:ct.subsidyKepcoEx, ok:'kepco'},
-            {l:'감리비',        ex:ct.supervEx,      off:!cd.includeSupv},
-          ]);
-        })().map(row=>{
-          const showSub=cd.subsidyApplied;
-          return (
-            <div key={row.l} style={{display:'grid',gridTemplateColumns:showSub?'1fr 110px 56px 95px':'1fr 120px',gap:4,padding:'5px 0',borderBottom:'1px solid var(--bd)',alignItems:'center'}}>
-              <span style={{fontSize:11,color:row.off?'var(--ink3)':'var(--ink2)',display:'flex',alignItems:'center',gap:5,overflow:'hidden'}}>
-                <span style={{whiteSpace:'nowrap'}}>{row.l}{row.off?' (미포함)':''}</span>
-                {!row.off&&row.meta&&<span style={{fontSize:9,color:'var(--ink3)',fontFamily:'IBM Plex Mono',whiteSpace:'nowrap',flexShrink:0}}>{row.meta}</span>}
+
+          const SubQtyInput=({ok,tq})=>(
+            <input type="number" min="0" max={tq}
+              value={so[ok]!=null?so[ok]:tq}
+              onChange={e=>{const nso={...so};const v=parseInt(e.target.value);if(isNaN(v)||v>=tq){delete nso[ok];}else{nso[ok]=Math.max(0,v);}updCost({subsidyOverrides:nso});}}
+              style={{width:44,padding:'2px 3px',fontSize:10,fontFamily:'IBM Plex Mono',fontWeight:600,textAlign:'center',border:'1px solid '+(so[ok]!=null&&so[ok]!==tq?'var(--acc)':'var(--bd)'),borderRadius:4,background:'#fff',color:so[ok]!=null&&so[ok]!==tq?'var(--acc)':'var(--ink)',outline:'none',margin:'0 auto'}}/>
+          );
+          const SimpleRow=({l,ex,sub,off,meta,ok,tq})=>(
+            <div style={{display:'grid',gridTemplateColumns:cols,gap:4,padding:'5px 0',borderBottom:'1px solid var(--bd)',alignItems:'center'}}>
+              <span style={{fontSize:11,color:off?'var(--ink3)':'var(--ink2)',display:'flex',alignItems:'center',gap:5,overflow:'hidden'}}>
+                <span style={{whiteSpace:'nowrap'}}>{l}{off?' (미포함)':''}</span>
+                {!off&&meta&&<span style={{fontSize:9,color:'var(--ink3)',fontFamily:'IBM Plex Mono',whiteSpace:'nowrap',flexShrink:0}}>{meta}</span>}
               </span>
-              <span style={{fontSize:10,fontFamily:'IBM Plex Mono',textAlign:'right',color:row.off||!row.ex?'var(--ink3)':'var(--ink2)'}}>{!row.off&&row.ex>0?fWon(row.ex):'—'}</span>
-              {showSub&&(row.ok&&!row.off&&row.ex>0&&!row.isToggle
-                ? <input type="number" min="0" max={row.tq}
-                    value={(cd.subsidyOverrides||{})[row.ok]!=null?(cd.subsidyOverrides||{})[row.ok]:row.tq}
-                    onChange={e=>{const so={...(cd.subsidyOverrides||{})};const v=parseInt(e.target.value);if(isNaN(v)||v>=row.tq){delete so[row.ok];}else{so[row.ok]=Math.max(0,v);}updCost({subsidyOverrides:so});}}
-                    style={{width:44,padding:'2px 3px',fontSize:11,fontFamily:'IBM Plex Mono',fontWeight:600,textAlign:'center',border:'1px solid '+(((cd.subsidyOverrides||{})[row.ok]!=null&&(cd.subsidyOverrides||{})[row.ok]!==row.tq)?'var(--acc)':'var(--bd)'),borderRadius:4,background:'#fff',color:(cd.subsidyOverrides||{})[row.ok]!=null&&(cd.subsidyOverrides||{})[row.ok]!==row.tq?'var(--acc)':'var(--ink)',outline:'none',margin:'0 auto'}}/>
-                : <span style={{fontSize:10,textAlign:'center',color:'var(--ink3)'}}>—</span>
-              )}
-              {showSub&&<span style={{fontSize:10,fontFamily:'IBM Plex Mono',textAlign:'right',fontWeight:600,color:'var(--grn)'}}>{!row.off&&row.sub>0?fWon(row.sub):'—'}</span>}
+              <span style={{fontSize:10,fontFamily:'IBM Plex Mono',textAlign:'right',color:off||!ex?'var(--ink3)':'var(--ink2)'}}>{!off&&ex>0?fWon(ex):'—'}</span>
+              {showSub&&(ok&&!off&&ex>0?<SubQtyInput ok={ok} tq={tq}/>:<span style={{fontSize:10,textAlign:'center',color:'var(--ink3)'}}>—</span>)}
+              {showSub&&<span style={{fontSize:10,fontFamily:'IBM Plex Mono',textAlign:'right',fontWeight:600,color:'var(--grn)'}}>{!off&&sub>0?fWon(sub):'—'}</span>}
             </div>
           );
-        })}
+          const multiCharger=items.filter(i=>(i.qty||0)>0).length>1;
+          const multiElec=elecItems.filter(i=>(parseFloat(i.qty)||0)>0).length>1;
+          return (<>
+          {/* ── 충전기 ── */}
+          {multiCharger?<>
+            <div style={{display:'grid',gridTemplateColumns:cols,gap:4,padding:'4px 0',borderBottom:'1px solid var(--bd)',background:'var(--s2)',margin:'0 -4px',padding:'4px 4px'}}>
+              <span style={{fontSize:11,fontWeight:600,color:'var(--ink)'}}>충전기 <span style={{fontSize:9,color:'var(--ink3)',fontFamily:'IBM Plex Mono',fontWeight:400,marginLeft:4}}>{ct.totalChargers}기 · 합계 {fWon(ct.chargerExVAT)}</span></span>
+              <span/>{showSub&&<span/>}{showSub&&<span style={{fontSize:10,fontFamily:'IBM Plex Mono',textAlign:'right',fontWeight:600,color:'var(--grn)'}}>{ct.subsidyChargerEx>0?fWon(ct.subsidyChargerEx):'—'}</span>}
+            </div>
+            {items.map((item,idx)=>{
+              const q=item.qty||0; if(!q)return null;
+              const ex=q*(item.unitPrice||0);
+              const ciSub=ct.ciSubDetails?ct.ciSubDetails[idx]:null;
+              const sub=ciSub?Math.round(ciSub.base/2):0;
+              const isLast=idx===items.length-1||items.slice(idx+1).every(i=>!(i.qty||0));
+              return <div key={'ci'+idx} style={{display:'grid',gridTemplateColumns:cols,gap:4,padding:'4px 0',borderBottom:'1px solid var(--bd)',alignItems:'center'}}>
+                <span style={{fontSize:10,color:'var(--ink3)',paddingLeft:12,display:'flex',alignItems:'center',gap:4}}>
+                  <span style={{fontSize:9,color:'var(--bd)',fontFamily:'IBM Plex Mono'}}>{isLast?'└':'├'}</span>
+                  <span>{item.model||'충전기'}</span>
+                  <span style={{fontSize:9,color:'var(--ink3)',fontFamily:'IBM Plex Mono'}}>{q}기 · {fWon(item.unitPrice||0)}</span>
+                </span>
+                <span style={{fontSize:10,fontFamily:'IBM Plex Mono',textAlign:'right',color:'var(--ink3)'}}>{fWon(ex)}</span>
+                {showSub&&<SubQtyInput ok={'ci_'+idx} tq={q}/>}
+                {showSub&&<span style={{fontSize:10,fontFamily:'IBM Plex Mono',textAlign:'right',fontWeight:600,color:'var(--grn)'}}>{sub>0?fWon(sub):'—'}</span>}
+              </div>;
+            })}
+          </>:<SimpleRow l="충전기" ex={ct.chargerExVAT} sub={ct.subsidyChargerEx}
+              meta={ct.totalChargers>0?`${ct.totalChargers}기 · ${fWon((items[0]||{}).unitPrice||0)}`:''} ok="ci_0" tq={ct.totalChargers}/>}
+
+          {/* ── 스탠드폴 ── */}
+          <SimpleRow l="스탠드폴" ex={ct.standExVAT} sub={ct.subsidyStandEx} meta={standMeta} ok="stand" tq={cd.standQty||0}/>
+
+          {/* ── 캐노피 (Case C) ── */}
+          {activeCaseType==='C'&&<SimpleRow l="캐노피" ex={ct.canopyExVAT} sub={ct.subsidyCanopyEx} meta={canopyMeta} ok="canopy" tq={cd.canopyQty||0}/>}
+
+          {/* ── 전기공사비 ── */}
+          {multiElec?<>
+            <div style={{display:'grid',gridTemplateColumns:cols,gap:4,padding:'4px 0',borderBottom:'1px solid var(--bd)',background:'var(--s2)',margin:'0 -4px',padding:'4px 4px'}}>
+              <span style={{fontSize:11,fontWeight:600,color:'var(--ink)'}}>전기공사비 <span style={{fontSize:9,color:'var(--ink3)',fontFamily:'IBM Plex Mono',fontWeight:400,marginLeft:4}}>합계 {fWon(ct.elecExVAT)}</span></span>
+              <span/>{showSub&&<span/>}{showSub&&<span style={{fontSize:10,fontFamily:'IBM Plex Mono',textAlign:'right',fontWeight:600,color:'var(--grn)'}}>{ct.subsidyElecEx>0?fWon(ct.subsidyElecEx):'—'}</span>}
+            </div>
+            {elecItems.map((item,idx)=>{
+              const q=parseFloat(item.qty)||0; if(!q)return null;
+              const ex=Math.round(q*(parseFloat(item.unitPrice)||0));
+              const eiSub=ct.eiSubDetails?ct.eiSubDetails[idx]:null;
+              const sub=eiSub?Math.round(eiSub.base/2):0;
+              const isLast=idx===elecItems.length-1||elecItems.slice(idx+1).every(i=>!(parseFloat(i.qty)||0));
+              return <div key={'ei'+idx} style={{display:'grid',gridTemplateColumns:cols,gap:4,padding:'4px 0',borderBottom:'1px solid var(--bd)',alignItems:'center'}}>
+                <span style={{fontSize:10,color:'var(--ink3)',paddingLeft:12,display:'flex',alignItems:'center',gap:4}}>
+                  <span style={{fontSize:9,color:'var(--bd)',fontFamily:'IBM Plex Mono'}}>{isLast?'└':'├'}</span>
+                  <span>{item.name||'공사'}</span>
+                  <span style={{fontSize:9,color:'var(--ink3)',fontFamily:'IBM Plex Mono'}}>{q}{item.unit||'식'}</span>
+                </span>
+                <span style={{fontSize:10,fontFamily:'IBM Plex Mono',textAlign:'right',color:'var(--ink3)'}}>{fWon(ex)}</span>
+                {showSub&&<SubQtyInput ok={'ei_'+idx} tq={q}/>}
+                {showSub&&<span style={{fontSize:10,fontFamily:'IBM Plex Mono',textAlign:'right',fontWeight:600,color:'var(--grn)'}}>{sub>0?fWon(sub):'—'}</span>}
+              </div>;
+            })}
+          </>:<SimpleRow l="전기공사비" ex={ct.elecExVAT} sub={ct.subsidyElecEx}
+              meta="" ok="ei_0" tq={(elecItems[0]?parseFloat(elecItems[0].qty):0)||0}/>}
+
+          {/* ── 법정비용 ── */}
+          <SimpleRow l="사용전검사비" ex={ct.inspEx} off={!cd.includeInsp}/>
+          <SimpleRow l="전기안전점검비" ex={ct.safetyEx} off={!cd.includeSafety}/>
+          <SimpleRow l="한전불입금" ex={ct.kepcoEx} off={ct.kepcoEx===0} sub={ct.subsidyKepcoEx} ok="kepco" tq={1}/>
+          <SimpleRow l="감리비" ex={ct.supervEx} off={!cd.includeSupv}/>
+          </>);
+        })()}
         {/* 소계 + 부가세 + 합계를 행으로 */}
         {(()=>{const totEx=activeCaseType==='C'?ct.totalCEx:ct.totalBEx;const totVT=activeCaseType==='C'?ct.totalCVT:ct.totalBVT;const totIn=activeCaseType==='C'?ct.totalCIn:ct.totalBIn;const cols=cd.subsidyApplied?'1fr 110px 56px 95px':'1fr 120px';return(<>
         <div style={{display:'grid',gridTemplateColumns:cols,gap:6,padding:`${6}px 0 ${4}px`,borderTop:'2px solid var(--bd)',marginTop:2}}>
@@ -1381,50 +1433,73 @@ function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
             </div>
             <div style={{color:'var(--ink2)'}}>
               <span style={{fontWeight:600}}>지급 가능액:</span>&nbsp;
-              {Math.round(ct.subsidyBaseEx/2)<=ct.subsidyAmt
-                ? <span>{fWon(ct.subsidyAmt)} <span style={{color:'var(--grn)',fontWeight:700}}>(한도 내 전액 수령 가능)</span></span>
-                : <span>{fWon(Math.round(ct.subsidyBaseEx/2))}이지만 최대 {fW(calcSubsidyMax(ct.subsidyQty))} 한도 초과
+              {(()=>{
+                const half=Math.round(ct.subsidyBaseEx/2);
+                const maxAmt=calcSubsidyMax(ct.subsidyQty)*10000;
+                if(half<=maxAmt){
+                  return <span>{fWon(ct.subsidyAmt)} <span style={{color:'var(--grn)',fontWeight:700}}>(한도 내 전액 수령 가능)</span></span>;
+                }else{
+                  return <span>{fWon(half)}이지만 최대 {fW(calcSubsidyMax(ct.subsidyQty))} 한도 초과
                     &nbsp;→&nbsp;<strong style={{color:'var(--grn)'}}>{fWon(ct.subsidyAmt)} 수령</strong>
-                    <span style={{color:'var(--red)',marginLeft:4}}>(초과분 {fWon(Math.round(ct.subsidyBaseEx/2)-ct.subsidyAmt)} 미지급)</span>
-                  </span>
-              }
+                    <span style={{color:'var(--red)',marginLeft:4}}>(초과분 {fWon(half-ct.subsidyAmt)} 미지급)</span>
+                  </span>;
+                }
+              })()}
             </div>
           </div>
           {(()=>{const totEx=activeCaseType==='C'?ct.totalCEx:ct.totalBEx;return(<>
           {(()=>{
             const netEx=totEx-ct.subsidyAmt;
             const so=cd.subsidyOverrides||{};
-            const subsidyQty=(cd.subsidyQty!=null&&cd.subsidyQty>=0)?cd.subsidyQty:ct.totalChargers;
-            const subCQ=so.charger!=null?so.charger:ct.totalChargers;
             const eligibleItems=(cd.chargerItems||[]).filter(i=>SUBSIDY_OFFICIAL_PRICE[i.model]);
-            const eligibleQty=Math.min(subCQ,eligibleItems.reduce((s,i)=>s+(i.qty||0),0));
-            const priceDiffPerUnit=eligibleItems.length>0?SUBSIDY_OFFICIAL_PRICE[eligibleItems[0].model]-(eligibleItems[0].unitPrice||0):0;
-            const totalPriceDiff=eligibleQty*priceDiffPerUnit;
-            const netExActual=netEx-totalPriceDiff;
+            const eligibleTotalQty=eligibleItems.reduce((s,i)=>s+(i.qty||0),0);
+            const eligibleSubsidyQty=eligibleItems.reduce((s,item,idx)=>{
+              const origIdx=(cd.chargerItems||[]).indexOf(item);
+              const sq=so['ci_'+origIdx]!=null?so['ci_'+origIdx]:(item.qty||0);
+              return s+sq;
+            },0);
+            const officialPrice=eligibleItems.length>0?SUBSIDY_OFFICIAL_PRICE[eligibleItems[0].model]:0;
+            const actualPrice=parseFloat(cd.actualChargerPrice)||0;
+            const enteredPrice=eligibleItems.length>0?(eligibleItems[0].unitPrice||0):0;
+            const costAdj=(enteredPrice-actualPrice)*eligibleTotalQty;
+            const subsidyAdj=Math.round((officialPrice-enteredPrice)*eligibleSubsidyQty/2);
+            const totalAdj=costAdj+subsidyAdj;
+            const netExActual=netEx-totalAdj;
             return (<>
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 0 0',borderTop:'1px solid var(--grn2)',marginTop:8}}>
             <span style={{fontWeight:700,fontSize:12}}>순 공사비 (공사비 합계 - 보조금) <span style={{fontSize:9,color:'var(--org)',fontWeight:700,marginLeft:4}}>VAT별도</span></span>
             <span style={{fontWeight:700,fontFamily:'IBM Plex Mono',color:'var(--org)',fontSize:13}}>{fWon(netEx)}</span>
           </div>
-          {totalPriceDiff>0&&<>
+          {totalAdj!==0&&<>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'6px 0 0'}}>
-              <span style={{fontWeight:700,fontSize:12,color:'var(--acc)'}}>순 공사비 (공사비 합계 - 보조금) <span style={{fontSize:9,fontWeight:500,color:'var(--ink3)'}}>실제매입</span> <span style={{fontSize:9,color:'var(--org)',fontWeight:700,marginLeft:4}}>VAT별도</span></span>
+              <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
+                <span style={{fontWeight:700,fontSize:12,color:'var(--acc)'}}>순 공사비 (공사비 합계 - 보조금) <span style={{fontSize:9,fontWeight:500,color:'var(--ink3)'}}>실제매입</span> <span style={{fontSize:9,color:'var(--org)',fontWeight:700}}>VAT별도</span></span>
+                <span style={{fontSize:9,color:'var(--ink3)',display:'flex',alignItems:'center',gap:3}}>
+                  실매입 단가
+                  <input type="text" inputMode="decimal" value={cd.actualChargerPrice||''}
+                    onChange={e=>{const v=e.target.value.replace(/[^0-9]/g,'');updCost({actualChargerPrice:v?parseInt(v):0});}}
+                    style={{width:72,padding:'2px 5px',fontSize:10,fontFamily:'IBM Plex Mono',fontWeight:600,border:'1px solid var(--acc)',borderRadius:4,textAlign:'right',background:'#fff',color:'var(--acc)',outline:'none'}}/>
+                  원
+                </span>
+              </div>
               <span style={{fontWeight:700,fontFamily:'IBM Plex Mono',color:'var(--acc)',fontSize:13}}>{fWon(netExActual)}</span>
             </div>
             <div style={{fontSize:9,color:'var(--ink3)',padding:'3px 0 0',fontFamily:'IBM Plex Mono',lineHeight:1.5}}>
-              = {fWon(netEx)} − 충전기 차액 ({eligibleItems[0]?.model}: {fWon(SUBSIDY_OFFICIAL_PRICE[eligibleItems[0]?.model])} − {fWon(eligibleItems[0]?.unitPrice||0)}) × {eligibleQty}기 = {fWon(netEx)} − {fWon(totalPriceDiff)}
+              실매입가 {fWon(actualPrice)} / 원가계산서 {fWon(officialPrice)} / 대상 {eligibleSubsidyQty}기
+              {costAdj!==0&&<><br/>비용보정: ({fWon(enteredPrice)}−{fWon(actualPrice)})×{eligibleTotalQty}기 = {fWon(costAdj)}</>}
+              {subsidyAdj!==0&&<><br/>보조금보정: ({fWon(officialPrice)}−{fWon(enteredPrice)})×{eligibleSubsidyQty}기÷2 = {fWon(subsidyAdj)}</>}
             </div>
           </>}
           {ct.totalChargers>0&&(()=>{
-            const finalNet=totalPriceDiff>0?netExActual:netEx;
+            const finalNet=totalAdj!==0?netExActual:netEx;
             const perUnit=Math.round(finalNet/ct.totalChargers);
             return (
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',padding:'5px 0 0',fontSize:10,color:'var(--ink3)',gap:8}}>
                 <div style={{display:'flex',flexDirection:'column',gap:2,minWidth:0}}>
-                  <span>1기당 순 공사비 ({ct.totalChargers}기 기준) {totalPriceDiff>0&&<span style={{color:'var(--acc)',fontSize:8,fontWeight:700}}>실제매입</span>} <span style={{fontSize:8,color:'var(--org)',fontWeight:700}}>VAT별도</span></span>
+                  <span>1기당 순 공사비 ({ct.totalChargers}기 기준) {totalAdj!==0&&<span style={{color:'var(--acc)',fontSize:8,fontWeight:700}}>실제매입</span>} <span style={{fontSize:8,color:'var(--org)',fontWeight:700}}>VAT별도</span></span>
                   <span style={{fontSize:9,color:'var(--ink3)',fontFamily:'IBM Plex Mono',lineHeight:1.4}}>= {fWon(finalNet)} ÷ {ct.totalChargers}기</span>
                 </div>
-                <span style={{fontFamily:'IBM Plex Mono',fontWeight:600,color:totalPriceDiff>0?'var(--acc)':'var(--ink2)',flexShrink:0}}>{fWon(perUnit)}</span>
+                <span style={{fontFamily:'IBM Plex Mono',fontWeight:600,color:totalAdj!==0?'var(--acc)':'var(--ink2)',flexShrink:0}}>{fWon(perUnit)}</span>
               </div>
             );
           })()}
@@ -1778,14 +1853,14 @@ function App(){
 
             </div>
             <div className="kpi acc" style={{flex:1.2}}>
-              <div className="kl">공사비 (VAT포함)</div>
-              <div className="kv">{fW(ct.totalCMan)}</div>
-              <div className="ks">공급가액 {fW(ct.totalCMan - toMan(ct.totalCVT))}</div>
+              <div className="kl">공사비 (VAT별도)</div>
+              <div className="kv">{fW(toMan(activeCaseType==='C'?ct.totalCEx:ct.totalBEx))}</div>
+              <div className="ks">공급가액 {fWon(activeCaseType==='C'?ct.totalCEx:ct.totalBEx)}</div>
             </div>
             {cd.subsidyApplied && <div className="kpi grn">
-              <div className="kl">보조금 차감 후</div>
-              <div className="kv">{fW(ct.netCMan)}</div>
-              <div className="ks">보조금 {fW(toMan(ct.subsidyAmt))}</div>
+              <div className="kl">보조금 차감 후 (VAT별도)</div>
+              <div className="kv">{fW(toMan((activeCaseType==='C'?ct.totalCEx:ct.totalBEx)-ct.subsidyAmt))}</div>
+              <div className="ks">보조금 {fWon(ct.subsidyAmt)}</div>
             </div>}
             <div className="kpi">
               <div className="kl">계약전력</div>
