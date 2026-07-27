@@ -513,7 +513,7 @@ const COST0={
   includeInsp:false, includeSafety:true, includeKepco:true, includeSupv:true,
   includeElecMgr:true, includeInspection:true, includeInsurance:true,
   elecMgrFee:0, inspectionCount:1,
-  subsidyApplied:false,subsidyQty:null,
+  subsidyApplied:false,subsidyQty:null,subsidyOverrides:{},
   buildingInvestment:false, buildingFundAmount:0, buildingMarginRate:15,
   chargerItems:[{id:1,kw:7,model:'HEV-S1007A',location:'옥내',qty:0,unitPrice:0}],
   standQty:0,standUnitPrice:0,
@@ -587,13 +587,18 @@ function calcCostTotals(cd) {
   const totalCVT=Math.round(totalCEx*.1);
   const totalCIn=totalCEx+totalCVT;
   const subsidyQty=(cd.subsidyQty!=null&&cd.subsidyQty>=0)?cd.subsidyQty:totalChargers;
-  const subsidyRatio=totalChargers>0?subsidyQty/totalChargers:0;
-  const subsidyBaseEx=Math.round((chargerExVAT+standExVAT+canopyExVAT+elecExVAT+kepcoEx)*subsidyRatio);
-  const subsidyChargerEx=Math.round(chargerExVAT*subsidyRatio/2);
-  const subsidyStandEx=Math.round(standExVAT*subsidyRatio/2);
-  const subsidyCanopyEx=Math.round(canopyExVAT*subsidyRatio/2);
-  const subsidyElecEx=Math.round(elecExVAT*subsidyRatio/2);
-  const subsidyKepcoEx=Math.round(kepcoEx*subsidyRatio/2);
+  const so=cd.subsidyOverrides||{};
+  const subChargerBase=so.charger!=null?so.charger:chargerExVAT;
+  const subStandBase=so.stand!=null?so.stand:standExVAT;
+  const subCanopyBase=so.canopy!=null?so.canopy:canopyExVAT;
+  const subElecBase=so.elec!=null?so.elec:elecExVAT;
+  const subKepcoBase=so.kepco!=null?so.kepco:kepcoEx;
+  const subsidyChargerEx=Math.round(subChargerBase/2);
+  const subsidyStandEx=Math.round(subStandBase/2);
+  const subsidyCanopyEx=Math.round(subCanopyBase/2);
+  const subsidyElecEx=Math.round(subElecBase/2);
+  const subsidyKepcoEx=Math.round(subKepcoBase/2);
+  const subsidyBaseEx=subChargerBase+subStandBase+subCanopyBase+subElecBase+subKepcoBase;
   const subsidyAmt=cd.subsidyApplied?Math.round(calcSubsidy(subsidyBaseEx,subsidyQty)*10000):0;
   const subsidyC=subsidyAmt;
   const netCWon=totalCIn+inspectionInc+insuranceInc+(parseFloat(cd.elecMgrFee)||0)*inspCnt-subsidyC;
@@ -1216,21 +1221,21 @@ function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
           const standMeta=(cd.standQty||0)>0?`${cd.standQty}개 · ${fWon(cd.standUnitPrice||0)}`:'';
           const canopyMeta=(cd.canopyQty||0)>0?`${cd.canopyQty}개 · ${fWon(cd.canopyUnitPrice||0)}`:'';
           return (activeCaseType==='C'?[
-            {l:'충전기',        ex:ct.chargerExVAT, sub:ct.subsidyChargerEx, meta:chargerMeta},
-            {l:'스탠드폴',      ex:ct.standExVAT,   sub:ct.subsidyStandEx,   meta:standMeta},
-            {l:'캐노피',        ex:ct.canopyExVAT,  sub:ct.subsidyCanopyEx,  meta:canopyMeta},
-            {l:'전기공사비',    ex:ct.elecExVAT,    sub:ct.subsidyElecEx},
+            {l:'충전기',        ex:ct.chargerExVAT, sub:ct.subsidyChargerEx, meta:chargerMeta, ok:'charger'},
+            {l:'스탠드폴',      ex:ct.standExVAT,   sub:ct.subsidyStandEx,   meta:standMeta, ok:'stand'},
+            {l:'캐노피',        ex:ct.canopyExVAT,  sub:ct.subsidyCanopyEx,  meta:canopyMeta, ok:'canopy'},
+            {l:'전기공사비',    ex:ct.elecExVAT,    sub:ct.subsidyElecEx, ok:'elec'},
             {l:'사용전검사비',  ex:ct.inspEx,        off:!cd.includeInsp},
             {l:'전기안전점검비',ex:ct.safetyEx,      off:!cd.includeSafety},
-            {l:'한전불입금',    ex:ct.kepcoEx,       off:ct.kepcoEx===0, sub:ct.subsidyKepcoEx},
+            {l:'한전불입금',    ex:ct.kepcoEx,       off:ct.kepcoEx===0, sub:ct.subsidyKepcoEx, ok:'kepco'},
             {l:'감리비',        ex:ct.supervEx,      off:!cd.includeSupv},
           ]:[
-            {l:'충전기',        ex:ct.chargerExVAT, sub:ct.subsidyChargerEx, meta:chargerMeta},
-            {l:'스탠드폴',      ex:ct.standExVAT,   sub:ct.subsidyStandEx,   meta:standMeta},
-            {l:'전기공사비',    ex:ct.elecExVAT,    sub:ct.subsidyElecEx},
+            {l:'충전기',        ex:ct.chargerExVAT, sub:ct.subsidyChargerEx, meta:chargerMeta, ok:'charger'},
+            {l:'스탠드폴',      ex:ct.standExVAT,   sub:ct.subsidyStandEx,   meta:standMeta, ok:'stand'},
+            {l:'전기공사비',    ex:ct.elecExVAT,    sub:ct.subsidyElecEx, ok:'elec'},
             {l:'사용전검사비',  ex:ct.inspEx,        off:!cd.includeInsp},
             {l:'전기안전점검비',ex:ct.safetyEx,      off:!cd.includeSafety},
-            {l:'한전불입금',    ex:ct.kepcoEx,       off:ct.kepcoEx===0, sub:ct.subsidyKepcoEx},
+            {l:'한전불입금',    ex:ct.kepcoEx,       off:ct.kepcoEx===0, sub:ct.subsidyKepcoEx, ok:'kepco'},
             {l:'감리비',        ex:ct.supervEx,      off:!cd.includeSupv},
           ]);
         })().map(row=>{
@@ -1242,7 +1247,21 @@ function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
                 {!row.off&&row.meta&&<span style={{fontSize:9,color:'var(--ink3)',fontFamily:'IBM Plex Mono',whiteSpace:'nowrap',flexShrink:0}}>{row.meta}</span>}
               </span>
               <span style={{fontSize:10,fontFamily:'IBM Plex Mono',textAlign:'right',color:row.off||!row.ex?'var(--ink3)':'var(--ink2)'}}>{!row.off&&row.ex>0?fWon(row.ex):'—'}</span>
-              {showSub&&<span style={{fontSize:10,fontFamily:'IBM Plex Mono',textAlign:'right',fontWeight:600,color:'var(--grn)'}}>{!row.off&&row.sub>0?fWon(row.sub):'—'}</span>}
+              {showSub&&<span style={{fontSize:10,fontFamily:'IBM Plex Mono',textAlign:'right',fontWeight:600,color:'var(--grn)',cursor:(!row.off&&row.ex>0&&row.ok)?'pointer':'default'}}
+                onClick={()=>{if(!row.off&&row.ex>0&&row.ok){
+                  const so={...(cd.subsidyOverrides||{})};
+                  const cur=so[row.ok];
+                  if(row.isToggle){
+                    if(cur===0){delete so[row.ok];}else{so[row.ok]=0;}
+                    updCost({subsidyOverrides:so});
+                  }else{
+                    const val=prompt(row.l+' 보조금 대상 수량\n전체: '+row.tq+row.unit+'\n현재: '+(cur!=null?cur+row.unit:row.tq+row.unit+' (전체)')+'\n\n전체 적용시 비워두세요');
+                    if(val===null)return;
+                    if(val.trim()===''){delete so[row.ok];}else{so[row.ok]=Math.min(parseInt(val)||0,row.tq);}
+                    updCost({subsidyOverrides:so});
+                  }
+                }}}
+              >{!row.off&&row.sub>0?fWon(row.sub):'—'}{!row.off&&row.ex>0&&row.ok&&(cd.subsidyOverrides||{})[row.ok]!=null&&<span style={{fontSize:8,color:'var(--org)',marginLeft:3}}>{row.isToggle?'제외':'('+((cd.subsidyOverrides||{})[row.ok])+row.unit+')'}</span>}</span>}
             </div>
           );
         })}
