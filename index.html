@@ -1199,7 +1199,7 @@ function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
       </div>
 
       {/* Cost detail card */}
-      <div className="card">
+      <div className="card" style={{maxWidth:`${detailWidth}%`}}>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
           <div className="card-title" style={{marginBottom:0}}>📋 공사비 상세</div>
           {setDetailWidth&&<div style={{display:'flex',alignItems:'center',gap:3}}>
@@ -1210,7 +1210,7 @@ function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
           </div>}
         </div>
         <div className="cost-detail-scroll">
-        <div style={{minWidth:0,maxWidth:`${detailWidth}%`}}>
+        <div style={{minWidth:0}}>
         {/* Header */}
         <div style={{display:'grid',gridTemplateColumns:cd.subsidyApplied?'1fr 110px 56px 95px':'1fr 120px',gap:4,padding:'4px 0',borderBottom:'2px solid var(--bd)',marginBottom:3}}>
           <div style={{fontSize:9,fontWeight:700,color:'var(--ink3)'}}>항목</div>
