@@ -513,7 +513,7 @@ const COST0={
   includeInsp:false, includeSafety:true, includeKepco:true, includeSupv:true,
   includeElecMgr:true, includeInspection:true, includeInsurance:true,
   elecMgrFee:0, inspectionCount:1,
-  subsidyApplied:false,
+  subsidyApplied:false,subsidyQty:null,
   buildingInvestment:false, buildingFundAmount:0, buildingMarginRate:15,
   chargerItems:[{id:1,kw:7,model:'HEV-S1007A',location:'옥내',qty:0,unitPrice:0}],
   standQty:0,standUnitPrice:0,
@@ -592,13 +592,14 @@ function calcCostTotals(cd) {
   const subsidyCanopyEx=Math.round(canopyExVAT/2);
   const subsidyElecEx=Math.round(elecExVAT/2);
   const subsidyKepcoEx=Math.round(kepcoEx/2);
-  const subsidyAmt=cd.subsidyApplied?Math.round(calcSubsidy(subsidyBaseEx,totalChargers)*10000):0;
+  const subsidyQty=(cd.subsidyQty!=null&&cd.subsidyQty>=0)?cd.subsidyQty:totalChargers;
+  const subsidyAmt=cd.subsidyApplied?Math.round(calcSubsidy(subsidyBaseEx,subsidyQty)*10000):0;
   const subsidyC=subsidyAmt;
   const netCWon=totalCIn+inspectionInc+insuranceInc+(parseFloat(cd.elecMgrFee)||0)*inspCnt-subsidyC;
   return {
     chargerExVAT,standExVAT,canopyExVAT,elecExVAT,legalEx,legalCostEx,
     inspEx,safetyEx,kepcoEx,supervEx,elecMgrEx,inspectionEx,insuranceEx,
-    inspectionInc,insuranceInc,totalChargers,inspCnt,
+    inspectionInc,insuranceInc,totalChargers,subsidyQty,inspCnt,
     totalBEx,totalBVT,totalBIn,totalCEx,totalCVT,totalCIn,
     subsidyBaseEx,subsidyChargerEx,subsidyStandEx,subsidyCanopyEx,subsidyElecEx,subsidyKepcoEx,
     subsidyAmt,subsidyC,netCWon,
@@ -919,7 +920,21 @@ function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
               <button className={`tog ${!cd.subsidyApplied?'on':''}`} onClick={()=>set('subsidyApplied',false)}>미신청 (0%)</button>
               <button className={`tog ${cd.subsidyApplied?'on-grn':''}`} onClick={()=>set('subsidyApplied',true)}>신청 (50% 지원)</button>
             </div>
-            {cd.subsidyApplied&&<div style={{marginTop:4,fontSize:10,color:'var(--grn)',fontWeight:600}}>총 투자비의 50% 차감</div>}
+            {cd.subsidyApplied&&<div style={{marginTop:6}}>
+              <div style={{fontSize:10,color:'var(--grn)',fontWeight:600,marginBottom:5}}>총 투자비의 50% 차감</div>
+              <div style={{display:'flex',alignItems:'center',gap:6,padding:'5px 8px',background:'var(--s2)',borderRadius:5,border:'1px solid var(--bd)'}}>
+                <span style={{fontSize:10,color:'var(--ink3)',whiteSpace:'nowrap'}}>보조금 대상</span>
+                <div style={{display:'flex',alignItems:'center',gap:4}}>
+                  <input type="number" min="0" max={ct.totalChargers} value={cd.subsidyQty!=null?cd.subsidyQty:ct.totalChargers}
+                    onChange={e=>{const v=parseInt(e.target.value); set('subsidyQty',isNaN(v)?null:Math.min(v,ct.totalChargers));}}
+                    style={{width:45,padding:'3px 5px',fontSize:11,fontWeight:700,border:'1px solid var(--bd)',borderRadius:4,textAlign:'center',fontFamily:'IBM Plex Mono',background:'#fff',color:'var(--ink)'}}/>
+                  <span style={{fontSize:10,color:'var(--ink3)'}}>/</span>
+                  <span style={{fontSize:10,color:'var(--ink3)'}}>{ct.totalChargers}기</span>
+                </div>
+                {cd.subsidyQty!=null&&cd.subsidyQty!==ct.totalChargers&&<span style={{fontSize:9,color:'var(--org)',fontWeight:600}}>({ct.totalChargers-cd.subsidyQty}기 제외)</span>}
+                {cd.subsidyQty!=null&&<button onClick={()=>set('subsidyQty',null)} style={{fontSize:9,color:'var(--ink3)',background:'none',border:'none',cursor:'pointer',textDecoration:'underline',fontFamily:'inherit',padding:0}}>전체로 초기화</button>}
+              </div>
+            </div>}
           </div>
         </div>
 
@@ -1336,7 +1351,7 @@ function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
         {/* Subsidy detail */}
         {cd.subsidyApplied&&<>
           <div style={{marginTop:8,padding:'8px 10px',background:'var(--grnd)',border:'1px solid var(--grn2)',borderRadius:6,fontSize:10,lineHeight:1.7}}>
-            <div style={{fontWeight:700,color:'var(--grn)',marginBottom:4,fontSize:11}}>💸 보조금 산정 ({ct.totalChargers}기)</div>
+            <div style={{fontWeight:700,color:'var(--grn)',marginBottom:4,fontSize:11}}>💸 보조금 산정 ({ct.subsidyQty}기 대상)</div>
             <div style={{color:'var(--ink2)'}}>
               <span style={{fontWeight:600}}>수식:</span>
               {ct.totalChargers===1&&' 1기 → 최대 220만원'}
