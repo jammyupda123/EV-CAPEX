@@ -1854,12 +1854,12 @@ function App(){
             </div>
             <div className="kpi acc" style={{flex:1.2}}>
               <div className="kl">공사비 (VAT별도)</div>
-              <div className="kv">{fW(toMan(activeCaseType==='C'?ct.totalCEx:ct.totalBEx))}</div>
-              <div className="ks">공급가액 {fWon(activeCaseType==='C'?ct.totalCEx:ct.totalBEx)}</div>
+              <div className="kv">{fW(toMan(ct.totalBEx))}</div>
+              <div className="ks">공급가액 {fWon(ct.totalBEx)}</div>
             </div>
             {cd.subsidyApplied && <div className="kpi grn">
               <div className="kl">보조금 차감 후 (VAT별도)</div>
-              <div className="kv">{fW(toMan((activeCaseType==='C'?ct.totalCEx:ct.totalBEx)-ct.subsidyAmt))}</div>
+              <div className="kv">{fW(toMan(ct.totalBEx-ct.subsidyAmt))}</div>
               <div className="ks">보조금 {fWon(ct.subsidyAmt)}</div>
             </div>}
             <div className="kpi">
