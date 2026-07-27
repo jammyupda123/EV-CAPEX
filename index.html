@@ -700,7 +700,7 @@ function NumInput({value, onChange, placeholder, style, className}){
   />;
 }
 
-function CostTab({site,cd,sm,updCost}){
+function CostTab({site,cd,sm,updCost,density=1,setDensity}){
   const set=(k,v)=>updCost({[k]:v});
   const kw=parseFloat(cd.contractKW)||0;
   // Which case is currently active in sim tab
@@ -1178,13 +1178,18 @@ function CostTab({site,cd,sm,updCost}){
 
       {/* Cost detail card */}
       <div className="card">
-        <div className="card-title">
-          📋 {activeCaseType==='C'?'Case C':activeCaseType==='N'?'신규계약':'Case '+activeCaseType} 공사비 상세
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:Math.round(6*density)}}>
+          <div className="card-title" style={{marginBottom:0}}>📋 {activeCaseType==='C'?'Case C':activeCaseType==='N'?'신규계약':'Case '+activeCaseType} 공사비 상세</div>
+          {setDensity&&<div style={{display:'flex',alignItems:'center',gap:3}}>
+            <span style={{fontSize:8,color:'var(--ink3)'}}>여백</span>
+            <button onClick={()=>setDensity(d=>Math.max(0.3,+(d-0.2).toFixed(1)))} style={{width:22,height:20,fontSize:12,fontWeight:700,border:'1px solid var(--bd)',borderRadius:3,background:'var(--s2)',cursor:'pointer',color:'var(--ink)',fontFamily:'inherit',display:'flex',alignItems:'center',justifyContent:'center'}}>−</button>
+            <button onClick={()=>setDensity(d=>Math.min(1.5,+(d+0.2).toFixed(1)))} style={{width:22,height:20,fontSize:12,fontWeight:700,border:'1px solid var(--bd)',borderRadius:3,background:'var(--s2)',cursor:'pointer',color:'var(--ink)',fontFamily:'inherit',display:'flex',alignItems:'center',justifyContent:'center'}}>+</button>
+          </div>}
         </div>
         <div className="cost-detail-scroll">
         <div style={{minWidth:0}}>
         {/* Header */}
-        <div style={{display:'grid',gridTemplateColumns:cd.subsidyApplied?'1fr 120px 100px':'1fr 120px',gap:6,padding:'4px 0',borderBottom:'2px solid var(--bd)',marginBottom:3}}>
+        <div style={{display:'grid',gridTemplateColumns:cd.subsidyApplied?'1fr 120px 100px':'1fr 120px',gap:6,padding:`${Math.round(4*density)}px 0`,borderBottom:'2px solid var(--bd)',marginBottom:Math.round(3*density)}}>
           <div style={{fontSize:9,fontWeight:700,color:'var(--ink3)'}}>항목</div>
           <div style={{fontSize:9,fontWeight:700,color:'var(--ink3)',textAlign:'right'}}>공급가액</div>
           {cd.subsidyApplied&&<div style={{fontSize:9,fontWeight:700,color:'var(--ink3)',textAlign:'right'}}>보조금</div>}
@@ -1214,7 +1219,7 @@ function CostTab({site,cd,sm,updCost}){
         })().map(row=>{
           const showSub=cd.subsidyApplied;
           return (
-            <div key={row.l} style={{display:'grid',gridTemplateColumns:showSub?'1fr 120px 100px':'1fr 120px',gap:6,padding:'5px 0',borderBottom:'1px solid var(--bd)',alignItems:'center'}}>
+            <div key={row.l} style={{display:'grid',gridTemplateColumns:showSub?'1fr 120px 100px':'1fr 120px',gap:6,padding:`${Math.round(5*density)}px 0`,borderBottom:'1px solid var(--bd)',alignItems:'center'}}>
               <span style={{fontSize:11,color:row.off?'var(--ink3)':'var(--ink2)',display:'flex',alignItems:'center',gap:5,overflow:'hidden'}}>
                 <span style={{whiteSpace:'nowrap'}}>{row.l}{row.off?' (미포함)':''}</span>
                 {!row.off&&row.meta&&<span style={{fontSize:9,color:'var(--ink3)',fontFamily:'IBM Plex Mono',whiteSpace:'nowrap',flexShrink:0}}>{row.meta}</span>}
@@ -1226,17 +1231,17 @@ function CostTab({site,cd,sm,updCost}){
         })}
         {/* 소계 + 부가세 + 합계를 행으로 */}
         {(()=>{const totEx=activeCaseType==='C'?ct.totalCEx:ct.totalBEx;const totVT=activeCaseType==='C'?ct.totalCVT:ct.totalBVT;const totIn=activeCaseType==='C'?ct.totalCIn:ct.totalBIn;const cols=cd.subsidyApplied?'1fr 120px 100px':'1fr 120px';return(<>
-        <div style={{display:'grid',gridTemplateColumns:cols,gap:6,padding:'6px 0 4px',borderTop:'2px solid var(--bd)',marginTop:2}}>
+        <div style={{display:'grid',gridTemplateColumns:cols,gap:6,padding:`${Math.round(6*density)}px 0 ${Math.round(4*density)}px`,borderTop:'2px solid var(--bd)',marginTop:2}}>
           <span style={{fontSize:11,fontWeight:600,color:'var(--ink2)'}}>공급가액 소계</span>
           <span style={{fontSize:10,fontFamily:'IBM Plex Mono',textAlign:'right',fontWeight:600,color:'var(--ink2)'}}>{fWon(totEx)}</span>
           {cd.subsidyApplied&&<span style={{fontSize:10,fontFamily:'IBM Plex Mono',textAlign:'right',fontWeight:700,color:'var(--grn)'}}>-{fWon(ct.subsidyAmt)}</span>}
         </div>
-        <div style={{display:'grid',gridTemplateColumns:cols,gap:6,padding:'4px 0'}}>
+        <div style={{display:'grid',gridTemplateColumns:cols,gap:6,padding:`${Math.round(4*density)}px 0`}}>
           <span style={{fontSize:11,color:'var(--ink3)'}}>부가세 (10%)</span>
           <span style={{fontSize:10,fontFamily:'IBM Plex Mono',textAlign:'right',color:'var(--ink3)'}}>{fWon(totVT)}</span>
           {cd.subsidyApplied&&<span/>}
         </div>
-        <div style={{display:'grid',gridTemplateColumns:cols,gap:6,padding:'6px 0 3px',borderTop:'1px solid var(--bd)',background:'var(--accl)',margin:'0 -10px',padding:'6px 10px 4px',borderRadius:'0 0 6px 6px'}}>
+        <div style={{display:'grid',gridTemplateColumns:cols,gap:6,padding:'6px 0 3px',borderTop:'1px solid var(--bd)',background:'var(--accl)',margin:'0 -10px',padding:`${Math.round(6*density)}px 10px ${Math.round(4*density)}px`,borderRadius:'0 0 6px 6px'}}>
           <span style={{fontSize:12,fontWeight:700,color:'var(--acc)'}}>합계 (VAT포함)</span>
           <span style={{fontSize:12,fontFamily:'IBM Plex Mono',textAlign:'right',fontWeight:700,color:'var(--acc)'}}>{fWon(totIn)}</span>
           {cd.subsidyApplied&&<span/>}
@@ -1247,7 +1252,7 @@ function CostTab({site,cd,sm,updCost}){
           const totEx=activeCaseType==='C'?ct.totalCEx:ct.totalBEx;
           const perUnit=Math.round(totEx/ct.totalChargers);
           return (
-            <div style={{marginTop:6,padding:'8px 10px',background:'var(--s2)',borderRadius:6,border:'1px solid var(--bd)'}}>
+            <div style={{marginTop:Math.round(6*density),padding:`${Math.round(8*density)}px 10px`,background:'var(--s2)',borderRadius:6,border:'1px solid var(--bd)'}}>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
                 <span style={{fontSize:11,fontWeight:600,color:'var(--ink2)'}}>1기당 공사비 ({ct.totalChargers}기 기준) <span style={{fontSize:8,color:'var(--org)',fontWeight:700}}>VAT별도</span></span>
                 <span style={{fontSize:12,fontFamily:'IBM Plex Mono',fontWeight:700,color:'var(--ink)'}}>{fWon(perUnit)}</span>
@@ -1511,6 +1516,7 @@ function App(){
   const [showAdd,setShowAdd]=useState(false);
   const [sbSearch,setSbSearch]=useState('');
   const [cardScale,setCardScale]=useState(1);
+  const [costDensity,setCostDensity]=useState(1);
   const cardW = Math.round(420 * cardScale);
   const nameFz = Math.round(13 * cardScale);
   const metaFz = Math.round(11 * cardScale);
@@ -1736,7 +1742,7 @@ function App(){
 
         {/* CostTab directly rendered */}
         <div className="content" style={{padding:12}}>
-          <CostTab site={site} cd={cd} sm={{}} updCost={updCost}/>
+          <CostTab site={site} cd={cd} sm={{}} updCost={updCost} density={costDensity} setDensity={setCostDensity}/>
         </div>
       </main>
     </div>
