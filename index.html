@@ -1211,9 +1211,10 @@ function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
         <div className="cost-detail-scroll">
         <div style={{minWidth:0,maxWidth:`${detailWidth}%`}}>
         {/* Header */}
-        <div style={{display:'grid',gridTemplateColumns:cd.subsidyApplied?'1fr 120px 100px':'1fr 120px',gap:6,padding:`${4}px 0`,borderBottom:'2px solid var(--bd)',marginBottom:3}}>
+        <div style={{display:'grid',gridTemplateColumns:cd.subsidyApplied?'1fr 110px 56px 95px':'1fr 120px',gap:4,padding:'4px 0',borderBottom:'2px solid var(--bd)',marginBottom:3}}>
           <div style={{fontSize:9,fontWeight:700,color:'var(--ink3)'}}>항목</div>
           <div style={{fontSize:9,fontWeight:700,color:'var(--ink3)',textAlign:'right'}}>공급가액</div>
+          {cd.subsidyApplied&&<div style={{fontSize:9,fontWeight:700,color:'var(--acc)',textAlign:'center'}}>대상수량</div>}
           {cd.subsidyApplied&&<div style={{fontSize:9,fontWeight:700,color:'var(--ink3)',textAlign:'right'}}>보조금</div>}
         </div>
         {(()=>{
@@ -1241,45 +1242,41 @@ function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
         })().map(row=>{
           const showSub=cd.subsidyApplied;
           return (
-            <div key={row.l} style={{display:'grid',gridTemplateColumns:showSub?'1fr 120px 100px':'1fr 120px',gap:6,padding:`${5}px 0`,borderBottom:'1px solid var(--bd)',alignItems:'center'}}>
+            <div key={row.l} style={{display:'grid',gridTemplateColumns:showSub?'1fr 110px 56px 95px':'1fr 120px',gap:4,padding:'5px 0',borderBottom:'1px solid var(--bd)',alignItems:'center'}}>
               <span style={{fontSize:11,color:row.off?'var(--ink3)':'var(--ink2)',display:'flex',alignItems:'center',gap:5,overflow:'hidden'}}>
                 <span style={{whiteSpace:'nowrap'}}>{row.l}{row.off?' (미포함)':''}</span>
                 {!row.off&&row.meta&&<span style={{fontSize:9,color:'var(--ink3)',fontFamily:'IBM Plex Mono',whiteSpace:'nowrap',flexShrink:0}}>{row.meta}</span>}
               </span>
               <span style={{fontSize:10,fontFamily:'IBM Plex Mono',textAlign:'right',color:row.off||!row.ex?'var(--ink3)':'var(--ink2)'}}>{!row.off&&row.ex>0?fWon(row.ex):'—'}</span>
-              {showSub&&<span style={{fontSize:10,fontFamily:'IBM Plex Mono',textAlign:'right',fontWeight:600,color:'var(--grn)',cursor:(!row.off&&row.ex>0&&row.ok)?'pointer':'default'}}
-                onClick={()=>{if(!row.off&&row.ex>0&&row.ok){
-                  const so={...(cd.subsidyOverrides||{})};
-                  const cur=so[row.ok];
-                  if(row.isToggle){
-                    if(cur===0){delete so[row.ok];}else{so[row.ok]=0;}
-                    updCost({subsidyOverrides:so});
-                  }else{
-                    const val=prompt(row.l+' 보조금 대상 수량\n전체: '+row.tq+row.unit+'\n현재: '+(cur!=null?cur+row.unit:row.tq+row.unit+' (전체)')+'\n\n전체 적용시 비워두세요');
-                    if(val===null)return;
-                    if(val.trim()===''){delete so[row.ok];}else{so[row.ok]=Math.min(parseInt(val)||0,row.tq);}
-                    updCost({subsidyOverrides:so});
-                  }
-                }}}
-              >{!row.off&&row.sub>0?fWon(row.sub):'—'}{!row.off&&row.ex>0&&row.ok&&(cd.subsidyOverrides||{})[row.ok]!=null&&<span style={{fontSize:8,color:'var(--org)',marginLeft:3}}>{row.isToggle?'제외':'('+((cd.subsidyOverrides||{})[row.ok])+row.unit+')'}</span>}</span>}
+              {showSub&&(row.ok&&!row.off&&row.ex>0&&!row.isToggle
+                ? <input type="number" min="0" max={row.tq}
+                    value={(cd.subsidyOverrides||{})[row.ok]!=null?(cd.subsidyOverrides||{})[row.ok]:row.tq}
+                    onChange={e=>{const so={...(cd.subsidyOverrides||{})};const v=parseInt(e.target.value);if(isNaN(v)||v>=row.tq){delete so[row.ok];}else{so[row.ok]=Math.max(0,v);}updCost({subsidyOverrides:so});}}
+                    style={{width:44,padding:'2px 3px',fontSize:11,fontFamily:'IBM Plex Mono',fontWeight:600,textAlign:'center',border:'1px solid '+(((cd.subsidyOverrides||{})[row.ok]!=null&&(cd.subsidyOverrides||{})[row.ok]!==row.tq)?'var(--acc)':'var(--bd)'),borderRadius:4,background:'#fff',color:(cd.subsidyOverrides||{})[row.ok]!=null&&(cd.subsidyOverrides||{})[row.ok]!==row.tq?'var(--acc)':'var(--ink)',outline:'none',margin:'0 auto'}}/>
+                : <span style={{fontSize:10,textAlign:'center',color:'var(--ink3)'}}>—</span>
+              )}
+              {showSub&&<span style={{fontSize:10,fontFamily:'IBM Plex Mono',textAlign:'right',fontWeight:600,color:'var(--grn)'}}>{!row.off&&row.sub>0?fWon(row.sub):'—'}</span>}
             </div>
           );
         })}
         {/* 소계 + 부가세 + 합계를 행으로 */}
-        {(()=>{const totEx=activeCaseType==='C'?ct.totalCEx:ct.totalBEx;const totVT=activeCaseType==='C'?ct.totalCVT:ct.totalBVT;const totIn=activeCaseType==='C'?ct.totalCIn:ct.totalBIn;const cols=cd.subsidyApplied?'1fr 120px 100px':'1fr 120px';return(<>
+        {(()=>{const totEx=activeCaseType==='C'?ct.totalCEx:ct.totalBEx;const totVT=activeCaseType==='C'?ct.totalCVT:ct.totalBVT;const totIn=activeCaseType==='C'?ct.totalCIn:ct.totalBIn;const cols=cd.subsidyApplied?'1fr 110px 56px 95px':'1fr 120px';return(<>
         <div style={{display:'grid',gridTemplateColumns:cols,gap:6,padding:`${6}px 0 ${4}px`,borderTop:'2px solid var(--bd)',marginTop:2}}>
           <span style={{fontSize:11,fontWeight:600,color:'var(--ink2)'}}>공급가액 소계</span>
           <span style={{fontSize:10,fontFamily:'IBM Plex Mono',textAlign:'right',fontWeight:600,color:'var(--ink2)'}}>{fWon(totEx)}</span>
+          {cd.subsidyApplied&&<span/>}
           {cd.subsidyApplied&&<span style={{fontSize:10,fontFamily:'IBM Plex Mono',textAlign:'right',fontWeight:700,color:'var(--grn)'}}>-{fWon(ct.subsidyAmt)}</span>}
         </div>
         <div style={{display:'grid',gridTemplateColumns:cols,gap:6,padding:`${4}px 0`}}>
           <span style={{fontSize:11,color:'var(--ink3)'}}>부가세 (10%)</span>
           <span style={{fontSize:10,fontFamily:'IBM Plex Mono',textAlign:'right',color:'var(--ink3)'}}>{fWon(totVT)}</span>
           {cd.subsidyApplied&&<span/>}
+          {cd.subsidyApplied&&<span/>}
         </div>
         <div style={{display:'grid',gridTemplateColumns:cols,gap:6,padding:'6px 0 3px',borderTop:'1px solid var(--bd)',background:'var(--accl)',margin:'0 -10px',padding:`${6}px 10px ${4}px`,borderRadius:'0 0 6px 6px'}}>
           <span style={{fontSize:12,fontWeight:700,color:'var(--acc)'}}>합계 (VAT포함)</span>
           <span style={{fontSize:12,fontFamily:'IBM Plex Mono',textAlign:'right',fontWeight:700,color:'var(--acc)'}}>{fWon(totIn)}</span>
+          {cd.subsidyApplied&&<span/>}
           {cd.subsidyApplied&&<span/>}
         </div>
         </>);})()}
