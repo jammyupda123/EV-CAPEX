@@ -1472,10 +1472,7 @@ function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
             <span style={{fontWeight:700,fontSize:12}}>순 공사비 (공사비 합계 - 보조금) <span style={{fontSize:10,color:'var(--org)',fontWeight:700,marginLeft:4}}>VAT별도</span></span>
             <span style={{fontWeight:700,fontFamily:'IBM Plex Mono',color:'var(--org)',fontSize:13}}>{fWon(netEx)}</span>
           </div>
-          {totalAdj!==0&&<>
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'6px 0 0'}}>
-              <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
-                <span style={{fontWeight:700,fontSize:12,color:'var(--acc)'}}>순 공사비 (공사비 합계 - 보조금) <span style={{fontSize:9,fontWeight:500,color:'var(--ink3)'}}>실제매입</span> <span style={{fontSize:9,color:'var(--org)',fontWeight:700}}>VAT별도</span></span>
+          <div style={{display:'flex',alignItems:'center',gap:8,padding:'6px 0 0',flexWrap:'wrap'}}>
                 <span style={{fontSize:11,color:'var(--ink3)',display:'flex',alignItems:'center',gap:4}}>
                   실매입 단가
                   <input type="text" inputMode="decimal" value={cd.actualChargerPrice||''}
@@ -1483,11 +1480,15 @@ function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
                     style={{width:80,padding:'3px 6px',fontSize:11,fontFamily:'IBM Plex Mono',fontWeight:600,border:'1px solid var(--acc)',borderRadius:4,textAlign:'right',background:'#fff',color:'var(--acc)',outline:'none'}}/>
                   원
                 </span>
-              </div>
+                <span style={{fontSize:9,color:'var(--ink3)',fontFamily:'IBM Plex Mono'}}>원가계산서 {fWon(officialPrice)} / 대상 {eligibleSubsidyQty}기</span>
+          </div>
+          {totalAdj!==0&&<>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'4px 0 0'}}>
+              <span style={{fontWeight:700,fontSize:12,color:'var(--acc)'}}>순 공사비 (공사비 합계 - 보조금) <span style={{fontSize:9,fontWeight:500,color:'var(--ink3)'}}>실제매입</span> <span style={{fontSize:9,color:'var(--org)',fontWeight:700}}>VAT별도</span></span>
               <span style={{fontWeight:700,fontFamily:'IBM Plex Mono',color:'var(--acc)',fontSize:13}}>{fWon(netExActual)}</span>
             </div>
             <div style={{fontSize:11,color:'var(--ink3)',padding:'4px 0 0',fontFamily:'IBM Plex Mono',lineHeight:1.6}}>
-              실매입가 {fWon(actualPrice)} / 원가계산서 {fWon(officialPrice)} / 대상 {eligibleSubsidyQty}기
+              실매입가 {fWon(actualPrice)}
               {costAdj!==0&&<><br/>비용보정: ({fWon(enteredPrice)}−{fWon(actualPrice)})×{eligibleTotalQty}기 = {fWon(costAdj)}</>}
               {subsidyAdj!==0&&<><br/>보조금보정: ({fWon(officialPrice)}−{fWon(enteredPrice)})×{eligibleSubsidyQty}기÷2 = {fWon(subsidyAdj)}</>}
             </div>
