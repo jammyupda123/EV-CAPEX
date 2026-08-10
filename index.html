@@ -152,6 +152,7 @@ body{font-family:'IBM Plex Sans KR',-apple-system,sans-serif;background:var(--bg
 .sb-list{flex:1;overflow-y:auto;overflow-x:hidden;padding:5px 7px;display:grid;grid-template-columns:1fr 1fr;gap:4px;align-content:start;min-height:0;}
 .sitem{padding:8px 10px;border-radius:var(--r);cursor:pointer;transition:.12s;border:1px solid var(--bd);background:var(--s2);min-height:0;min-width:0;overflow:hidden;}
 .sitem:hover{background:var(--s3,#e8e5e0);border-color:var(--ink3);}
+.sitem[draggable="true"]{cursor:grab;}.sitem[draggable="true"]:active{cursor:grabbing;}
 .sitem.active{background:var(--accl);border-color:var(--acc);box-shadow:0 0 0 1px var(--acc);}
 .sitem-name{font-size:13px;font-weight:600;color:var(--ink);margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .sitem.active .sitem-name{color:var(--acc);}
@@ -1658,6 +1659,12 @@ function App(){
   const [checkedIds,setCheckedIds]=useState([]);
   const [deleteMode,setDeleteMode]=useState(false);
   const [editingSite,setEditingSite]=useState(null);
+  const [dragId,setDragId]=useState(null);
+  const [dragOverId,setDragOverId]=useState(null);
+  const handleDragStart=(e,id)=>{setDragId(id);e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',id);};
+  const handleDragOver=(e,id)=>{e.preventDefault();e.dataTransfer.dropEffect='move';if(id!==dragOverId)setDragOverId(id);};
+  const handleDrop=(e,targetId)=>{e.preventDefault();if(dragId==null||dragId===targetId){setDragId(null);setDragOverId(null);return;}const fromIdx=sites.findIndex(s=>s.id===dragId);const toIdx=sites.findIndex(s=>s.id===targetId);if(fromIdx<0||toIdx<0){setDragId(null);setDragOverId(null);return;}const ns=[...sites];const[moved]=ns.splice(fromIdx,1);ns.splice(toIdx,0,moved);setSites(ns);setDragId(null);setDragOverId(null);};
+  const handleDragEnd=()=>{setDragId(null);setDragOverId(null);};
   const updateSite = (patch) => setSites(ss=>ss.map(s=>s.id===sid?{...s,...patch}:s));
 
   // Load data
@@ -1815,7 +1822,16 @@ function App(){
             const c=costMap[s.id]||COST0;
             const total=(c.chargerItems||[]).reduce((s2,i)=>s2+(i.qty||0),0);
             return <div key={s.id} className={`sitem ${s.id===sid?'active':''}`}
-              style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',padding:`${padH}px ${padV}px`}}
+              draggable={!deleteMode}
+              onDragStart={e=>handleDragStart(e,s.id)}
+              onDragOver={e=>handleDragOver(e,s.id)}
+              onDrop={e=>handleDrop(e,s.id)}
+              onDragEnd={handleDragEnd}
+              style={{display:'flex',alignItems:'center',gap:6,cursor:deleteMode?'pointer':'grab',padding:`${padH}px ${padV}px`,
+                opacity:dragId===s.id?0.4:1,
+                borderColor:dragOverId===s.id&&dragId!==s.id?'var(--acc)':undefined,
+                background:dragOverId===s.id&&dragId!==s.id?'var(--accl)':undefined,
+                transition:'opacity .15s, border-color .15s, background .15s'}}
               onClick={()=>{if(!deleteMode)setSid(s.id);}}>
               {deleteMode&&<div onClick={e=>{e.stopPropagation();setCheckedIds(p=>p.includes(s.id)?p.filter(x=>x!==s.id):[...p,s.id]);}}
                 style={{width:16,height:16,borderRadius:3,border:`2px solid ${checkedIds.includes(s.id)?'var(--red)':'var(--bd)'}`,background:checkedIds.includes(s.id)?'var(--red)':'transparent',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center'}}>
