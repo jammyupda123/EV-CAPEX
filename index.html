@@ -1142,7 +1142,7 @@ function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
     {/* ── RIGHT: 합계 ── */}
     <div style={{display:'flex',flexDirection:'column',gap:10}}>
       {/* Summary box */}
-      <div className="cost-total-box">
+      <div className="cost-total-box" style={{maxWidth:`${detailWidth}%`}}>
         {(()=>{
           // 기준 공사비 (보조금 차감 전 / VAT별도)
           const baseEx = activeCaseType==='C' ? ct.totalCEx : ct.totalBEx;
