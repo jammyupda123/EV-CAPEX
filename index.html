@@ -1656,12 +1656,14 @@ function App(){
   const padH = Math.round(8 * cardScale);
   const padV = Math.round(10 * cardScale);
   const [sbFilter,setSbFilter]=useState('전체');
+  const [statusFilter,setStatusFilter]=useState('전체');
   const [checkedIds,setCheckedIds]=useState([]);
   const [deleteMode,setDeleteMode]=useState(false);
   const [editingSite,setEditingSite]=useState(null);
   const [dragId,setDragId]=useState(null);
   const [dragOverId,setDragOverId]=useState(null);
   const updateSite = (patch) => setSites(ss=>ss.map(s=>s.id===sid?{...s,...patch}:s));
+  const toggleCompleted = (id) => setSites(ss=>ss.map(s=>s.id===id?{...s,completed:!s.completed}:s));
 
   // Load data
   window._onUserSelected = async ()=>{
@@ -1732,8 +1734,13 @@ function App(){
   const filteredSites = sites.filter(s=>{
     const rgMatch = sbFilter==='전체' || s.region===sbFilter;
     const searchMatch = !sbSearch || s.name.toLowerCase().includes(sbSearch.toLowerCase()) || (s.address||'').toLowerCase().includes(sbSearch.toLowerCase());
-    return rgMatch && searchMatch;
+    const stMatch = statusFilter==='전체' || (statusFilter==='진행중'?!s.completed:!!s.completed);
+    return rgMatch && searchMatch && stMatch;
   });
+  const progressCount = sites.filter(s=>!s.completed).length;
+  const completedCount = sites.filter(s=>!!s.completed).length;
+  const filteredProgress = filteredSites.filter(s=>!s.completed);
+  const filteredCompleted = filteredSites.filter(s=>!!s.completed);
 
   const totalChargers = sites.reduce((s,site)=>{
     const c=costMap[site.id]||COST0;
@@ -1794,12 +1801,22 @@ function App(){
 
         {/* Filter & Search */}
         <div style={{padding:'0 8px 8px',display:'flex',flexDirection:'column',gap:5,borderBottom:'1px solid var(--bd)'}}>
+          {/* 상태 필터 탭 */}
+          <div style={{display:'flex',gap:3}}>
+            {[['전체',sites.length],['진행중',progressCount],['준공',completedCount]].map(([label,cnt])=>(
+              <button key={label} onClick={()=>setStatusFilter(label)}
+                style={{flex:1,padding:'4px 0',fontSize:10,fontWeight:600,fontFamily:'inherit',borderRadius:4,cursor:'pointer',transition:'.12s',
+                  background:statusFilter===label?(label==='준공'?'var(--grn)':'var(--acc)'):'var(--s2)',
+                  color:statusFilter===label?'#fff':'var(--ink2)',
+                  border:`1px solid ${statusFilter===label?(label==='준공'?'var(--grn)':'var(--acc)'):'var(--bd)'}`
+                }}>{label} <span style={{fontFamily:'IBM Plex Mono',fontSize:9,opacity:.8}}>{cnt}</span></button>
+            ))}
+          </div>
           <select style={{background:'var(--s2)',border:'1px solid var(--bd)',borderRadius:4,padding:'4px 6px',fontSize:10,color:'var(--ink)',fontFamily:'inherit',outline:'none',width:'100%'}}
             value={sbFilter} onChange={e=>setSbFilter(e.target.value)}>
             <option value="전체">전체 지역</option>
             {REGIONS.map(r=><option key={r} value={r}>{r}</option>)}
           </select>
-
           <div style={{position:'relative'}}>
             <input placeholder="🔍 현장명 검색" value={sbSearch} onChange={e=>setSbSearch(e.target.value)}
               style={{width:'100%',padding:'5px 28px 5px 8px',fontSize:10,border:'1px solid var(--bd)',borderRadius:5,background:'var(--s2)',color:'var(--ink)',fontFamily:'inherit',outline:'none',boxSizing:'border-box'}}/>
@@ -1808,39 +1825,59 @@ function App(){
           </div>
         </div>
 
-        {/* Site list — compact rows */}
+        {/* Site list — compact rows with completion checkbox */}
         <div className="sb-list">
-          {filteredSites.map(s=>{
-            const c=costMap[s.id]||COST0;
-            const total=(c.chargerItems||[]).reduce((s2,i)=>s2+(i.qty||0),0);
-            const dotColor=REGION_COLORS[s.region]||'var(--ink3)';
-            return <div key={s.id} className={`sitem ${s.id===sid?'active':''}`}
-              draggable={!deleteMode}
-              onDragStart={e=>{setDragId(s.id);e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',s.id);}}
-              onDragOver={e=>{e.preventDefault();e.dataTransfer.dropEffect='move';if(s.id!==dragOverId)setDragOverId(s.id);}}
-              onDrop={e=>{e.preventDefault();if(dragId==null||dragId===s.id){setDragId(null);setDragOverId(null);return;}const fromIdx=sites.findIndex(x=>x.id===dragId);const toIdx=sites.findIndex(x=>x.id===s.id);if(fromIdx<0||toIdx<0){setDragId(null);setDragOverId(null);return;}const ns=[...sites];const[moved]=ns.splice(fromIdx,1);ns.splice(toIdx,0,moved);setSites(ns);setDragId(null);setDragOverId(null);}}
-              onDragEnd={()=>{setDragId(null);setDragOverId(null);}}
-              style={{display:'flex',alignItems:'center',gap:8,cursor:deleteMode?'pointer':'grab',
-                opacity:dragId===s.id?0.35:1,
-                background:dragOverId===s.id&&dragId!==s.id?'var(--accl)':'',
-                borderBottom:dragOverId===s.id&&dragId!==s.id?'2px solid var(--acc)':'',
-                transition:'opacity .15s, background .15s'}}
-              onClick={()=>{if(!deleteMode)setSid(s.id);}}>
-              {deleteMode?<div onClick={e=>{e.stopPropagation();setCheckedIds(p=>p.includes(s.id)?p.filter(x=>x!==s.id):[...p,s.id]);}}
-                style={{width:16,height:16,borderRadius:3,border:`2px solid ${checkedIds.includes(s.id)?'var(--red)':'var(--bd)'}`,background:checkedIds.includes(s.id)?'var(--red)':'transparent',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center'}}>
-                {checkedIds.includes(s.id)&&<span style={{color:'#fff',fontSize:9,fontWeight:700}}>✓</span>}
-              </div>
-              :<div style={{width:8,height:8,borderRadius:'50%',background:dotColor,flexShrink:0}} title={s.region}/>}
-              <div style={{flex:1,minWidth:0,overflow:'hidden',whiteSpace:'nowrap',textOverflow:'ellipsis'}}>
-                <span style={{fontSize:12,fontWeight:600,color:s.id===sid?'var(--acc)':'var(--ink)'}}>{s.name}</span>
-              </div>
-              <span style={{fontSize:10,color:'var(--ink3)',fontFamily:'IBM Plex Mono',flexShrink:0}}>{total}기</span>
-            </div>;
-          })}
+          {(()=>{
+            const renderRow=(s)=>{
+              const c2=costMap[s.id]||COST0;
+              const total=(c2.chargerItems||[]).reduce((s2,i)=>s2+(i.qty||0),0);
+              const dotColor=REGION_COLORS[s.region]||'var(--ink3)';
+              const done=!!s.completed;
+              return <div key={s.id} className={`sitem ${s.id===sid?'active':''}`}
+                draggable={!deleteMode}
+                onDragStart={e=>{setDragId(s.id);e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',s.id);}}
+                onDragOver={e=>{e.preventDefault();e.dataTransfer.dropEffect='move';if(s.id!==dragOverId)setDragOverId(s.id);}}
+                onDrop={e=>{e.preventDefault();if(dragId==null||dragId===s.id){setDragId(null);setDragOverId(null);return;}const fromIdx=sites.findIndex(x=>x.id===dragId);const toIdx=sites.findIndex(x=>x.id===s.id);if(fromIdx<0||toIdx<0){setDragId(null);setDragOverId(null);return;}const ns=[...sites];const[moved]=ns.splice(fromIdx,1);ns.splice(toIdx,0,moved);setSites(ns);setDragId(null);setDragOverId(null);}}
+                onDragEnd={()=>{setDragId(null);setDragOverId(null);}}
+                style={{display:'flex',alignItems:'center',gap:8,cursor:deleteMode?'pointer':'grab',
+                  opacity:dragId===s.id?0.35:1,
+                  background:dragOverId===s.id&&dragId!==s.id?'var(--accl)':'',
+                  borderBottom:dragOverId===s.id&&dragId!==s.id?'2px solid var(--acc)':'',
+                  transition:'opacity .15s, background .15s'}}
+                onClick={()=>{if(!deleteMode)setSid(s.id);}}>
+                {/* 좌측: 삭제모드=삭제체크 / 일반=준공체크 */}
+                {deleteMode
+                  ?<div onClick={e=>{e.stopPropagation();setCheckedIds(p=>p.includes(s.id)?p.filter(x=>x!==s.id):[...p,s.id]);}}
+                    style={{width:16,height:16,borderRadius:3,border:`2px solid ${checkedIds.includes(s.id)?'var(--red)':'var(--bd)'}`,background:checkedIds.includes(s.id)?'var(--red)':'transparent',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                    {checkedIds.includes(s.id)&&<span style={{color:'#fff',fontSize:9,fontWeight:700}}>✓</span>}
+                  </div>
+                  :<div onClick={e=>{e.stopPropagation();toggleCompleted(s.id);}}
+                    style={{width:14,height:14,borderRadius:3,border:`1.5px solid ${done?'var(--grn)':'var(--bd2)'}`,background:done?'var(--grn)':'transparent',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',transition:'.12s'}}>
+                    {done&&<span style={{color:'#fff',fontSize:8,fontWeight:700}}>✓</span>}
+                  </div>
+                }
+                <div style={{width:8,height:8,borderRadius:'50%',background:dotColor,flexShrink:0,opacity:done?0.4:1}} title={s.region}/>
+                <div style={{flex:1,minWidth:0,overflow:'hidden',whiteSpace:'nowrap',textOverflow:'ellipsis'}}>
+                  <span style={{fontSize:12,fontWeight:done?400:600,color:s.id===sid?'var(--acc)':done?'var(--ink3)':'var(--ink)',textDecoration:done?'line-through':'none'}}>{s.name}</span>
+                </div>
+                <span style={{fontSize:10,color:'var(--ink3)',fontFamily:'IBM Plex Mono',flexShrink:0,opacity:done?0.5:1}}>{total}기</span>
+              </div>;
+            };
+            return statusFilter!=='전체'
+              ? filteredSites.map(renderRow)
+              : <>
+                  {filteredProgress.length>0&&filteredCompleted.length>0&&<div style={{padding:'6px 12px 3px',fontSize:9,fontWeight:700,color:'var(--acc)',textTransform:'uppercase',letterSpacing:'.04em',borderBottom:'1px solid var(--bd)'}}>진행중 ({filteredProgress.length})</div>}
+                  {filteredProgress.map(renderRow)}
+                  {filteredCompleted.length>0&&<div style={{padding:'8px 12px 3px',fontSize:9,fontWeight:700,color:'var(--grn)',textTransform:'uppercase',letterSpacing:'.04em',borderTop:'1px solid var(--bd)',borderBottom:'1px solid var(--bd)',marginTop:2}}>준공완료 ({filteredCompleted.length})</div>}
+                  {filteredCompleted.map(renderRow)}
+                </>;
+          })()}
         </div>
 
-        <div className="sb-foot">
-          <div className="sfstat"><div className="n">{filteredSites.length}</div><div className="l">현장</div></div>
+        <div className="sb-foot" style={{gridTemplateColumns:'1fr 1fr 1fr 1fr'}}>
+          <div className="sfstat"><div className="n">{sites.length}</div><div className="l">전체</div></div>
+          <div className="sfstat"><div className="n" style={{color:'var(--acc)'}}>{progressCount}</div><div className="l">진행중</div></div>
+          <div className="sfstat"><div className="n" style={{color:'var(--grn)'}}>{completedCount}</div><div className="l">준공</div></div>
           <div className="sfstat"><div className="n">{totalChargers}</div><div className="l">총 기수</div></div>
         </div>
       </aside>
