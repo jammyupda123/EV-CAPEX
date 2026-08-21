@@ -150,7 +150,7 @@ body{font-family:'IBM Plex Sans KR',-apple-system,sans-serif;background:var(--bg
 .btn-add{width:100%;padding:6px 8px;background:var(--accl);border:1px dashed var(--acc);border-radius:var(--r);color:var(--acc);font-size:11px;font-weight:600;font-family:inherit;cursor:pointer;transition:.15s;}
 .btn-add:hover{background:var(--accd);}
 .sb-list{flex:1;overflow-y:auto;overflow-x:hidden;padding:0;display:flex;flex-direction:column;min-height:0;}
-.sitem{padding:7px 12px;border-radius:0;cursor:pointer;transition:.12s;border:none;border-bottom:1px solid var(--bd);background:transparent;min-height:0;min-width:0;overflow:hidden;}
+.sitem{padding:10px 12px;border-radius:0;cursor:pointer;transition:.12s;border:none;border-bottom:1px solid var(--bd);background:transparent;min-height:0;min-width:0;overflow:hidden;}
 .sitem:hover{background:var(--s2);}
 .sitem.active{background:var(--accl);border-left:3px solid var(--acc);box-shadow:none;}
 .sitem-name{font-size:13px;font-weight:600;color:var(--ink);margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -1853,7 +1853,7 @@ function App(){
                 onDrop={e=>{e.preventDefault();if(dragId==null||dragId===s.id){setDragId(null);setDragOverId(null);return;}const fromIdx=sites.findIndex(x=>x.id===dragId);const toIdx=sites.findIndex(x=>x.id===s.id);if(fromIdx<0||toIdx<0){setDragId(null);setDragOverId(null);return;}const ns=[...sites];const[moved]=ns.splice(fromIdx,1);ns.splice(toIdx,0,moved);setSites(ns);setDragId(null);setDragOverId(null);}}
                 onDragEnd={()=>{setDragId(null);setDragOverId(null);}}
                 style={{display:'flex',alignItems:'center',gap:Math.round(8*rowSize),cursor:deleteMode?'pointer':'grab',
-                  padding:`${Math.round(7*rowSize)}px 12px`,
+                  padding:`${Math.round(10*rowSize)}px 12px`,
                   opacity:dragId===s.id?0.35:1,
                   background:dragOverId===s.id&&dragId!==s.id?'var(--accl)':'',
                   borderBottom:dragOverId===s.id&&dragId!==s.id?'2px solid var(--acc)':'',
