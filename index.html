@@ -605,7 +605,13 @@ function calcCostTotals(cd) {
   const subStandBase=standTotalQty>0?Math.round(standExVAT*subSQ/standTotalQty):0;
   const subCanopyBase=canopyTotalQty>0?Math.round(canopyExVAT*subNQ/canopyTotalQty):0;
   const subElecBase=eiSubs.reduce((s,e)=>s+e.base,0);
-  const subKepcoBase=kepcoEx;
+  const kepcoSubs=pts?pts.map(p=>{
+    const amt=calcKepco(parseFloat(p.contractKW)||0,p.powerSupplyType||'신규수전(지중)');
+    const ov=so['kp_'+p.id];
+    const q=ov!=null?(ov>0?1:0):1;
+    return {id:p.id,amt,qty:q,base:amt*q,type:p.powerSupplyType||'신규수전(지중)'};
+  }):[];
+  const subKepcoBase=pts?kepcoSubs.reduce((t,k)=>t+k.base,0):kepcoEx;
   const subsidyChargerEx=Math.round(subChargerBase/2);
   const subsidyStandEx=Math.round(subStandBase/2);
   const subsidyCanopyEx=Math.round(subCanopyBase/2);
@@ -624,7 +630,7 @@ function calcCostTotals(cd) {
     inspectionInc,insuranceInc,totalChargers,subsidyQty,inspCnt,
     totalBEx,totalBVT,totalBIn,totalCEx,totalCVT,totalCIn,
     subsidyBaseEx,subsidyChargerEx,subsidyStandEx,subsidyCanopyEx,subsidyElecEx,subsidyKepcoEx,
-    subsidyAmt,subsidyC,netCWon,ciSubDetails,eiSubDetails,
+    subsidyAmt,subsidyC,netCWon,ciSubDetails,eiSubDetails,kepcoSubDetails:kepcoSubs,
     totalBMan:toMan(totalBIn),totalCMan:toMan(totalCIn),netCMan:toMan(netCWon),
   };
 }
@@ -804,6 +810,7 @@ function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
 
 
 
+  const PP_COLORS=['#378ADD','#7F77DD','#1D9E75','#D85A30','#D4537E','#BA7517'];
   const PP_TYPES=[{v:'모자분리',a:'모자분리',b:''},{v:'신규수전(지중)',a:'신규수전',b:'(지중)'},{v:'신규수전(가공)',a:'신규수전',b:'(가공)'}];
   const ppFees=(pp)=>{
     const k=parseFloat(pp.contractKW)||0;
@@ -838,7 +845,7 @@ function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
         </div>
 
         {/* 거점별 계약전력 카드 */}
-        <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:10}}>
+        <div style={{display:'flex',flexDirection:'column',gap:10,marginBottom:10}}>
           {powerPoints.map((pp,pi)=>{
             const f=ppFees(pp);
             const ppKW=f.k;
@@ -847,14 +854,15 @@ function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
             const locs=pp.installLocations||[];
             const pay=f.kepco>0;
             const name=pp.label||`거점 ${pi+1}`;
+            const barColor=PP_COLORS[pi%PP_COLORS.length];
             const setLocs=(nl)=>updPP(pp.id,{installLocations:nl});
             const addLoc=()=>{const id=Date.now();setFocusLocId(id);setLocs([...locs,{id,name:'',detail:''}]);};
             const pill={fontSize:10,padding:'1px 7px',borderRadius:10,background:'var(--s3)',color:'var(--ink2)',whiteSpace:'nowrap'};
-            return <div key={pp.id} style={{background:'var(--s2)',border:'1px solid var(--bd)',borderRadius:7,overflow:'hidden'}}>
+            return <div key={pp.id} style={{background:'var(--s2)',border:'1px solid var(--bd)',borderLeft:`6px solid ${barColor}`,borderRadius:7,overflow:'hidden'}}>
               {/* 헤더 */}
               <div onClick={()=>setPpCollapsed(c=>({...c,[pp.id]:!c[pp.id]}))}
                 style={{display:'flex',alignItems:'center',gap:7,padding:'8px 12px',cursor:'pointer',borderBottom:collapsed?'none':'1px solid var(--bd)',flexWrap:'wrap'}}>
-                <span style={{fontSize:10,fontWeight:700,color:'var(--acc)',fontFamily:'IBM Plex Mono',flexShrink:0}}>#{pi+1}</span>
+                <span style={{fontSize:10,fontWeight:700,color:barColor,fontFamily:'IBM Plex Mono',flexShrink:0}}>#{pi+1}</span>
                 {ppEditId===pp.id
                   ? <>
                       <input autoFocus value={ppDraft}
@@ -893,7 +901,7 @@ function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
                   <div style={{display:'flex',alignItems:'center',gap:6,margin:'3px 0 10px'}}>
                     <input className="finput" type="number" step="1" value={pp.contractKW||''} placeholder="0"
                       onChange={e=>updPP(pp.id,{contractKW:+e.target.value})}
-                      style={{width:96,textAlign:'right',fontFamily:'IBM Plex Mono',fontWeight:600}}/>
+                      style={{width:96,textAlign:'right',fontFamily:'IBM Plex Mono',fontWeight:600,background:'#fff'}}/>
                     <span style={{fontSize:11,color:'var(--ink2)'}}>kW</span>
                   </div>
 
@@ -1352,7 +1360,35 @@ function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
           {/* ── 법정비용 ── */}
           <SimpleRow l="사용전검사비" ex={ct.inspEx} off={!cd.includeInsp}/>
           <SimpleRow l="전기안전점검비" ex={ct.safetyEx} off={!cd.includeSafety}/>
-          <SimpleRow l="한전불입금" ex={ct.kepcoEx} off={ct.kepcoEx===0} sub={ct.subsidyKepcoEx} ok="kepco" tq={1}/>
+          {(()=>{
+            const kd=(ct.kepcoSubDetails||[]).filter(k=>k.amt>0);
+            if(kd.length>=2){
+              return <>
+                <div style={{display:'grid',gridTemplateColumns:cols,gap:4,borderBottom:'1px solid var(--bd)',background:'var(--s2)',margin:'0 -4px',padding:'4px 4px'}}>
+                  <span style={{fontSize:11,fontWeight:600,color:'var(--ink)'}}>한전불입금 <span style={{fontSize:10,color:'var(--ink3)',fontFamily:'IBM Plex Mono',fontWeight:400,marginLeft:4}}>합계 {fWon(ct.kepcoEx)}</span></span>
+                  <span/>{showSub&&<span/>}{showSub&&<span style={{fontSize:10,fontFamily:'IBM Plex Mono',textAlign:'right',fontWeight:600,color:'var(--grn)'}}>{ct.subsidyKepcoEx>0?fWon(ct.subsidyKepcoEx):'—'}</span>}
+                </div>
+                {kd.map((k,idx)=>{
+                  const pi=powerPoints.findIndex(x=>x.id===k.id);
+                  const pp=powerPoints[pi];
+                  const nm=(pp&&pp.label)||`거점 ${pi+1}`;
+                  const isLast=idx===kd.length-1;
+                  const sub=Math.round(k.base/2);
+                  return <div key={'kp'+k.id} style={{display:'grid',gridTemplateColumns:cols,gap:4,padding:'4px 0',borderBottom:'1px solid var(--bd)',alignItems:'center'}}>
+                    <span style={{fontSize:10,color:'var(--ink3)',paddingLeft:12,display:'flex',alignItems:'center',gap:4}}>
+                      <span style={{fontSize:10,color:'var(--bd)',fontFamily:'IBM Plex Mono'}}>{isLast?'└':'├'}</span>
+                      <span>{nm}</span>
+                      <span style={{fontSize:10,color:'var(--ink3)',fontFamily:'IBM Plex Mono'}}>{k.type.replace('신규수전','')}</span>
+                    </span>
+                    <span style={{fontSize:10,fontFamily:'IBM Plex Mono',textAlign:'right',color:'var(--ink3)'}}>{fWon(k.amt)}</span>
+                    {showSub&&<SubQtyInput ok={'kp_'+k.id} tq={1}/>}
+                    {showSub&&<span style={{fontSize:10,fontFamily:'IBM Plex Mono',textAlign:'right',fontWeight:600,color:'var(--grn)'}}>{sub>0?fWon(sub):'—'}</span>}
+                  </div>;
+                })}
+              </>;
+            }
+            return <SimpleRow l="한전불입금" ex={ct.kepcoEx} off={ct.kepcoEx===0} sub={ct.subsidyKepcoEx} ok={kd.length===1?'kp_'+kd[0].id:undefined} tq={1}/>;
+          })()}
           <SimpleRow l="감리비" ex={ct.supervEx} off={!cd.includeSupv}/>
           </>);
         })()}
