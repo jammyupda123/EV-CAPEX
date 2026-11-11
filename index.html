@@ -724,6 +724,11 @@ function NumInput({value, onChange, placeholder, style, className}){
 }
 
 function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
+  const [ppCollapsed,setPpCollapsed]=useState({});
+  const [ppEditId,setPpEditId]=useState(null);
+  const [ppDraft,setPpDraft]=useState('');
+  const [focusLocId,setFocusLocId]=useState(null);
+  const ppCancel=useRef(false);
   const set=(k,v)=>updCost({[k]:v});
   const kw=parseFloat(cd.contractKW)||0;
   // Which case is currently active in sim tab
@@ -799,6 +804,27 @@ function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
 
 
 
+  const PP_TYPES=[{v:'모자분리',a:'모자분리',b:''},{v:'신규수전(지중)',a:'신규수전',b:'(지중)'},{v:'신규수전(가공)',a:'신규수전',b:'(가공)'}];
+  const ppFees=(pp)=>{
+    const k=parseFloat(pp.contractKW)||0;
+    const insp=pp.includeInsp!==false?calcInsp(k):0;
+    const safety=pp.includeSafety!==false?calcSafety(k,cd.buildingType):0;
+    const kepco=calcKepco(k,pp.powerSupplyType||'신규수전(지중)');
+    return {k,insp,safety,kepco,sub:insp+safety+kepco};
+  };
+  const feeRow=(label,formula,on,amt,toggle)=>(
+    <div onClick={toggle} style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:6,padding:'5px 0',cursor:'pointer',userSelect:'none'}}>
+      <div style={{minWidth:0}}>
+        <div style={{display:'flex',alignItems:'center',gap:5,fontSize:11,fontWeight:600,color:on?'var(--ink)':'var(--ink3)'}}>
+          <span style={{width:14,height:14,borderRadius:3,flexShrink:0,border:`1.5px solid ${on?'var(--acc)':'var(--bd2)'}`,background:on?'var(--acc)':'transparent',display:'inline-flex',alignItems:'center',justifyContent:'center',color:'#fff',fontSize:10,fontWeight:700}}>{on&&'✓'}</span>
+          {label}
+        </div>
+        <div style={{fontSize:10,color:'var(--ink3)',paddingLeft:19,lineHeight:1.4}}>{formula}</div>
+      </div>
+      <span style={{fontSize:11,fontFamily:'IBM Plex Mono',fontWeight:600,color:on?'var(--acc)':'var(--ink3)',flexShrink:0}}>{on?fWon(amt):'제외'}</span>
+    </div>
+  );
+
   return <div className="cost-layout">
     {/* ── LEFT ── */}
     <div className="cost-col-1" style={{display:'flex',flexDirection:'column',gap:10}}>
@@ -812,121 +838,136 @@ function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
         </div>
 
         {/* 거점별 계약전력 카드 */}
-        <div style={{display:'flex',flexDirection:'column',gap:7,marginBottom:10}}>
+        <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:10}}>
           {powerPoints.map((pp,pi)=>{
-            const ppKW=parseFloat(pp.contractKW)||0;
-            const inspAmt=pp.includeInsp!==false?calcInsp(ppKW):0;
-            const safetyAmt=pp.includeSafety!==false?calcSafety(ppKW,cd.buildingType):0;
-            const kepcoAmt=calcKepco(ppKW,pp.powerSupplyType||'신규수전(지중)');
-            return <div key={pp.id} style={{background:'var(--s2)',border:'1px solid var(--bd)',borderRadius:7,padding:'9px 10px'}}>
-              {/* 거점 헤더 */}
-              <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:7}}>
+            const f=ppFees(pp);
+            const ppKW=f.k;
+            const type=pp.powerSupplyType||'신규수전(지중)';
+            const collapsed=!!ppCollapsed[pp.id];
+            const locs=pp.installLocations||[];
+            const pay=f.kepco>0;
+            const name=pp.label||`거점 ${pi+1}`;
+            const setLocs=(nl)=>updPP(pp.id,{installLocations:nl});
+            const addLoc=()=>{const id=Date.now();setFocusLocId(id);setLocs([...locs,{id,name:'',detail:''}]);};
+            const pill={fontSize:10,padding:'1px 7px',borderRadius:10,background:'var(--s3)',color:'var(--ink2)',whiteSpace:'nowrap'};
+            return <div key={pp.id} style={{background:'var(--s2)',border:'1px solid var(--bd)',borderRadius:7,overflow:'hidden'}}>
+              {/* 헤더 */}
+              <div onClick={()=>setPpCollapsed(c=>({...c,[pp.id]:!c[pp.id]}))}
+                style={{display:'flex',alignItems:'center',gap:7,padding:'8px 12px',cursor:'pointer',borderBottom:collapsed?'none':'1px solid var(--bd)',flexWrap:'wrap'}}>
                 <span style={{fontSize:10,fontWeight:700,color:'var(--acc)',fontFamily:'IBM Plex Mono',flexShrink:0}}>#{pi+1}</span>
-                <input style={{flex:1,fontSize:11,fontWeight:600,background:'transparent',border:'none',borderBottom:'1px solid var(--bd)',outline:'none',color:'var(--ink)',padding:'1px 3px',fontFamily:'inherit'}}
-                  value={pp.label||`거점 ${pi+1}`} onChange={e=>updPP(pp.id,{label:e.target.value})} placeholder={`거점 ${pi+1}`}/>
-                {powerPoints.length>1&&<button onClick={()=>removePP(pp.id)}
+                {ppEditId===pp.id
+                  ? <>
+                      <input autoFocus value={ppDraft}
+                        onClick={e=>e.stopPropagation()}
+                        onFocus={e=>e.target.select()}
+                        onChange={e=>setPpDraft(e.target.value)}
+                        onKeyDown={e=>{if(e.key==='Enter'){e.target.blur();}else if(e.key==='Escape'){ppCancel.current=true;e.target.blur();}}}
+                        onBlur={()=>{
+                          if(ppCancel.current){ppCancel.current=false;setPpEditId(null);return;}
+                          const v=ppDraft.trim(); if(v) updPP(pp.id,{label:v}); setPpEditId(null);
+                        }}
+                        style={{fontSize:12,fontWeight:600,padding:'2px 6px',border:'1px solid var(--acc)',borderRadius:4,outline:'none',fontFamily:'inherit',width:150,background:'#fff',color:'var(--ink)'}}/>
+                      <span style={{fontSize:10,color:'var(--ink3)'}}>Enter 저장 · Esc 취소</span>
+                    </>
+                  : <span title="클릭하여 이름 수정"
+                      onClick={e=>{e.stopPropagation();ppCancel.current=false;setPpEditId(pp.id);setPpDraft(name);}}
+                      style={{fontSize:12,fontWeight:600,cursor:'text',display:'inline-flex',alignItems:'center',gap:4}}>
+                      {name}<span style={{fontSize:11,color:'var(--ink3)'}}>✎</span>
+                    </span>}
+                {collapsed&&<>
+                  <span style={{...pill,fontFamily:'IBM Plex Mono'}}>{ppKW}kW</span>
+                  <span style={{...pill,background:pay?'var(--orgd)':'var(--s3)',color:pay?'var(--org)':'var(--ink2)'}}>{type}</span>
+                  <span style={pill}>위치 {locs.length}곳</span>
+                </>}
+                <span style={{flex:1}}/>
+                {collapsed&&<span style={{fontSize:11,fontFamily:'IBM Plex Mono',fontWeight:700,color:'var(--acc)'}}>{fWon(f.sub)}</span>}
+                {powerPoints.length>1&&<button onClick={e=>{e.stopPropagation();removePP(pp.id);}} title="거점 삭제"
                   style={{width:20,height:20,borderRadius:4,border:'1px solid var(--red2)',background:'var(--redd)',color:'var(--red)',cursor:'pointer',fontSize:12,fontWeight:700,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,fontFamily:'inherit'}}>×</button>}
+                <span style={{fontSize:12,color:'var(--ink3)',width:14,textAlign:'center'}}>{collapsed?'▾':'▴'}</span>
               </div>
-              {/* 계약전력 + 수전방식 */}
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:7}}>
-                <div>
-                  <div className="flbl">계약전력 (kW)</div>
-                  <input className="finput" type="number" step="1" value={pp.contractKW||''} placeholder="kW"
-                    onChange={e=>updPP(pp.id,{contractKW:+e.target.value})}/>
-                </div>
-                <div>
-                  <div className="flbl">수전방식</div>
-                  <div style={{display:'flex',flexDirection:'column',gap:3,marginTop:2}}>
-                    {['모자분리','신규수전(지중)','신규수전(가공)'].map(v=>(
-                      <button key={v} className={`tog ${(pp.powerSupplyType||'신규수전(지중)')===v?'on':''}`}
-                        style={{fontSize:10,padding:'3px 4px',textAlign:'left'}}
-                        onClick={()=>updPP(pp.id,{powerSupplyType:v})}>{v}</button>
-                    ))}
+
+              {!collapsed&&<div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(240px,1fr))',gap:14,padding:'10px 12px'}}>
+                {/* 좌: 입력 */}
+                <div style={{minWidth:0}}>
+                  <div className="flbl">계약전력</div>
+                  <div style={{display:'flex',alignItems:'center',gap:6,margin:'3px 0 10px'}}>
+                    <input className="finput" type="number" step="1" value={pp.contractKW||''} placeholder="0"
+                      onChange={e=>updPP(pp.id,{contractKW:+e.target.value})}
+                      style={{width:96,textAlign:'right',fontFamily:'IBM Plex Mono',fontWeight:600}}/>
+                    <span style={{fontSize:11,color:'var(--ink2)'}}>kW</span>
                   </div>
-                  {(pp.powerSupplyType||'신규수전(지중)')==='모자분리'&&<div className="fhint" style={{color:'var(--grn)',marginTop:2}}>한전불입금 없음</div>}
-                </div>
-              </div>
-              {/* 세부설치위치 */}
-              <div style={{borderTop:'1px dashed var(--bd)',paddingTop:6,marginBottom:6}}>
-                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:4}}>
-                  <div style={{fontSize:9,fontWeight:700,color:'var(--ink3)'}}>📍 세부 설치위치</div>
-                  <button onClick={()=>{
-                    const locs=pp.installLocations||[];
-                    updPP(pp.id,{installLocations:[...locs,{id:Date.now(),name:'',detail:''}]});
-                  }} style={{fontSize:9,fontWeight:700,padding:'2px 7px',background:'var(--accl)',border:'1px solid var(--acc)',borderRadius:4,color:'var(--acc)',cursor:'pointer',fontFamily:'inherit'}}>+ 추가</button>
-                </div>
-                {(pp.installLocations||[]).length===0
-                  ? <div style={{fontSize:9,color:'var(--ink3)',padding:'4px 0'}}>설치위치를 추가하세요</div>
-                  : (pp.installLocations||[]).map((loc,li)=>(
-                    <div key={loc.id} style={{display:'flex',gap:4,alignItems:'center',marginBottom:3}}>
-                      <span style={{fontSize:9,fontWeight:700,color:'var(--acc)',fontFamily:'IBM Plex Mono',flexShrink:0}}>{li+1}</span>
+
+                  <div className="flbl">수전방식 <span style={{fontWeight:400,color:'var(--ink3)'}}>(아래 숫자: 한전불입금 예상액)</span></div>
+                  <div style={{display:'grid',gridTemplateColumns:'repeat(3,minmax(0,1fr))',gap:4,margin:'3px 0 10px'}}>
+                    {PP_TYPES.map(o=>{
+                      const on=type===o.v;
+                      const est=o.v==='모자분리'?'없음':(ppKW>0?calcKepco(ppKW,o.v).toLocaleString():'-');
+                      return <button key={o.v} onClick={()=>updPP(pp.id,{powerSupplyType:o.v})}
+                        style={{border:`1px solid ${on?'var(--acc)':'var(--bd)'}`,background:on?'var(--acc)':'#fff',color:on?'#fff':'var(--ink)',borderRadius:5,padding:'5px 2px',cursor:'pointer',fontFamily:'inherit',textAlign:'center',minWidth:0}}>
+                        <span style={{display:'block',fontSize:11,fontWeight:600,lineHeight:1.25}}>{o.a}</span>
+                        <span style={{display:'block',fontSize:11,fontWeight:600,lineHeight:1.25,minHeight:14}}>{o.b}</span>
+                        <span style={{display:'block',fontSize:10,fontFamily:'IBM Plex Mono',marginTop:2,color:on?'rgba(255,255,255,.85)':'var(--ink3)'}}>{est}</span>
+                      </button>;
+                    })}
+                  </div>
+
+                  <div className="flbl" style={{marginBottom:4}}>설치위치</div>
+                  {locs.map((loc,li)=>(
+                    <div key={loc.id} style={{display:'flex',gap:5,alignItems:'center',marginBottom:4}}>
+                      <span style={{fontSize:10,fontWeight:700,color:'var(--acc)',fontFamily:'IBM Plex Mono',width:10,flexShrink:0}}>{li+1}</span>
                       <input placeholder="예: B1F / 13기둥 / 5기" value={loc.detail||''}
-                        onChange={e=>{const nl=[...(pp.installLocations||[])]; nl[li]={...nl[li],detail:e.target.value}; updPP(pp.id,{installLocations:nl});}}
-                        style={{flex:1,padding:'4px 6px',fontSize:10,border:'1px solid var(--bd)',borderRadius:4,background:'#fff',color:'var(--ink)',fontFamily:'inherit',outline:'none',boxSizing:'border-box'}}/>
-                      <button onClick={()=>{const nl=(pp.installLocations||[]).filter(l=>l.id!==loc.id); updPP(pp.id,{installLocations:nl});}}
-                        style={{background:'none',border:'none',cursor:'pointer',fontSize:14,color:'var(--red)',padding:'0 2px',lineHeight:1,flexShrink:0}}>×</button>
+                        autoFocus={focusLocId===loc.id}
+                        onChange={e=>{const nl=[...locs];nl[li]={...nl[li],detail:e.target.value};setLocs(nl);}}
+                        onKeyDown={e=>{
+                          if(e.key==='Enter'&&(loc.detail||'').trim()){e.preventDefault();addLoc();}
+                          else if(e.key==='Escape'){ if(!(loc.detail||'').trim()) setLocs(locs.filter(l=>l.id!==loc.id)); else e.target.blur(); }
+                        }}
+                        onBlur={()=>{ setFocusLocId(null); if(!(loc.detail||'').trim()) setLocs(locs.filter(l=>l.id!==loc.id)); }}
+                        style={{flex:1,minWidth:0,padding:'4px 7px',fontSize:11,border:'1px solid var(--bd)',borderRadius:4,background:'#fff',color:'var(--ink)',fontFamily:'inherit',outline:'none',boxSizing:'border-box'}}/>
+                      <button onMouseDown={e=>e.preventDefault()} onClick={()=>setLocs(locs.filter(l=>l.id!==loc.id))} title="삭제"
+                        style={{background:'none',border:'none',cursor:'pointer',fontSize:14,color:'var(--ink3)',padding:'0 2px',lineHeight:1,flexShrink:0}}>×</button>
                     </div>
-                  ))
-                }
-              </div>
-              {/* 자동계산 비용 체크박스 */}
-              {ppKW>0&&<div style={{borderTop:'1px dashed var(--bd)',paddingTop:6,display:'flex',flexDirection:'column',gap:3}}>
-                <div style={{fontSize:9,fontWeight:700,color:'var(--ink3)',marginBottom:2}}>자동 계산 비용</div>
-                {/* 사용전검사비 */}
-                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'3px 6px',
-                  background:pp.includeInsp!==false?'var(--accl)':'var(--s3)',
-                  border:`1px solid ${pp.includeInsp!==false?'rgba(29,78,216,.2)':'var(--bd)'}`,
-                  borderRadius:4,cursor:'pointer'}}
-                  onClick={()=>updPP(pp.id,{includeInsp:pp.includeInsp===false?true:false})}>
-                  <div style={{display:'flex',alignItems:'center',gap:5}}>
-                    <div style={{width:13,height:13,borderRadius:3,flexShrink:0,
-                      border:`2px solid ${pp.includeInsp!==false?'var(--acc)':'var(--bd)'}`,
-                      background:pp.includeInsp!==false?'var(--acc)':'transparent',
-                      display:'flex',alignItems:'center',justifyContent:'center'}}>
-                      {pp.includeInsp!==false&&<span style={{color:'#fff',fontSize:8,fontWeight:700}}>✓</span>}
-                    </div>
-                    <span style={{fontSize:10,color:pp.includeInsp!==false?'var(--acc)':'var(--ink3)',fontWeight:600}}>사용전검사비</span>
-                    <span style={{fontSize:9,color:'var(--ink3)'}}>94,000 + {ppKW}kW×391원</span>
-                  </div>
-                  <span style={{fontSize:10,fontFamily:'IBM Plex Mono',fontWeight:700,color:pp.includeInsp!==false?'var(--acc)':'var(--ink3)'}}>
-                    {pp.includeInsp!==false?fWon(inspAmt):'제외'}
-                  </span>
+                  ))}
+                  <button onClick={addLoc}
+                    style={{background:'none',border:'none',color:'var(--acc)',fontSize:10,fontWeight:700,cursor:'pointer',padding:'2px 0 0 15px',fontFamily:'inherit'}}>+ 위치 추가</button>
                 </div>
-                {/* 전기안전점검비 */}
-                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'3px 6px',
-                  background:pp.includeSafety!==false?'var(--accl)':'var(--s3)',
-                  border:`1px solid ${pp.includeSafety!==false?'rgba(29,78,216,.2)':'var(--bd)'}`,
-                  borderRadius:4,cursor:'pointer'}}
-                  onClick={()=>updPP(pp.id,{includeSafety:pp.includeSafety===false?true:false})}>
-                  <div style={{display:'flex',alignItems:'center',gap:5}}>
-                    <div style={{width:13,height:13,borderRadius:3,flexShrink:0,
-                      border:`2px solid ${pp.includeSafety!==false?'var(--acc)':'var(--bd)'}`,
-                      background:pp.includeSafety!==false?'var(--acc)':'transparent',
-                      display:'flex',alignItems:'center',justifyContent:'center'}}>
-                      {pp.includeSafety!==false&&<span style={{color:'#fff',fontSize:8,fontWeight:700}}>✓</span>}
+
+                {/* 우: 비용 패널 */}
+                <div style={{background:'var(--s1)',border:'1px solid var(--bd)',borderRadius:6,padding:'8px 10px',alignSelf:'start',minWidth:0}}>
+                  <div className="flbl" style={{marginBottom:2}}>자동 계산 비용</div>
+                  {ppKW>0?<>
+                    {feeRow('사용전검사비',`94,000 + ${ppKW}kW×391원`,pp.includeInsp!==false,f.insp||calcInsp(ppKW),()=>updPP(pp.id,{includeInsp:pp.includeInsp===false?true:false}))}
+                    {feeRow('전기안전점검비',`${SAFETY_T[cd.buildingType||'general']?.label} 기준`,pp.includeSafety!==false,f.safety||calcSafety(ppKW,cd.buildingType),()=>updPP(pp.id,{includeSafety:pp.includeSafety===false?true:false}))}
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'5px 8px',borderRadius:5,margin:'3px 0',background:pay?'var(--orgd)':'var(--s2)',border:`1px solid ${pay?'var(--org2)':'var(--bd)'}`}}>
+                      <span style={{fontSize:11,fontWeight:600,color:pay?'var(--org)':'var(--ink3)'}}>한전불입금</span>
+                      <span style={{fontSize:11,fontFamily:'IBM Plex Mono',fontWeight:700,color:pay?'var(--org)':'var(--ink3)'}}>{pay?fWon(f.kepco):'없음'}</span>
                     </div>
-                    <span style={{fontSize:10,color:pp.includeSafety!==false?'var(--acc)':'var(--ink3)',fontWeight:600}}>전기안전점검비</span>
-                    <span style={{fontSize:9,color:'var(--ink3)'}}>({SAFETY_T[cd.buildingType||'general']?.label})</span>
-                  </div>
-                  <span style={{fontSize:10,fontFamily:'IBM Plex Mono',fontWeight:700,color:pp.includeSafety!==false?'var(--acc)':'var(--ink3)'}}>
-                    {pp.includeSafety!==false?fWon(safetyAmt):'제외'}
-                  </span>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',borderTop:'1px solid var(--bd2)',marginTop:5,paddingTop:7}}>
+                      <span style={{fontSize:11,fontWeight:700}}>소계</span>
+                      <span style={{fontSize:12,fontFamily:'IBM Plex Mono',fontWeight:700,color:'var(--acc)'}}>{fWon(f.sub)}</span>
+                    </div>
+                  </>:<div style={{fontSize:10,color:'var(--ink3)',padding:'6px 0'}}>계약전력을 입력하세요</div>}
                 </div>
-                {/* 한전불입금 (수전방식에 따라 자동) */}
-                {(pp.powerSupplyType||'신규수전(지중)')!=='모자분리'&&kepcoAmt>0&&<div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'3px 6px',background:'var(--grnd)',border:'1px solid var(--grn2)',borderRadius:4}}>
-                  <span style={{fontSize:10,color:'var(--grn)',fontWeight:600}}>한전불입금 ({pp.powerSupplyType||'신규수전(지중)'})</span>
-                  <span style={{fontSize:10,fontFamily:'IBM Plex Mono',fontWeight:700,color:'var(--grn)'}}>{fWon(kepcoAmt)}</span>
-                </div>}
               </div>}
             </div>;
           })}
         </div>
 
         {/* 합계 표시 */}
-        {powerPoints.length>1&&<div style={{padding:'6px 10px',background:'var(--ink)',borderRadius:6,marginBottom:10,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-          <span style={{fontSize:10,color:'rgba(255,255,255,.6)',fontWeight:600}}>총 계약전력 ({powerPoints.length}개 거점 합산)</span>
-          <span style={{fontSize:13,fontWeight:700,color:'#fff',fontFamily:'IBM Plex Mono'}}>{totalKW} kW</span>
-        </div>}
+        {powerPoints.length>1&&(()=>{
+          const legal=powerPoints.reduce((t,pp)=>{const f=ppFees(pp);return t+f.insp+f.safety;},0);
+          const kep=powerPoints.reduce((t,pp)=>t+ppFees(pp).kepco,0);
+          const cell=(label,val,color)=><div style={{background:'var(--s2)',border:'1px solid var(--bd)',borderRadius:6,padding:'6px 9px',minWidth:0}}>
+            <div style={{fontSize:10,color:'var(--ink3)',fontWeight:600}}>{label}</div>
+            <div style={{fontSize:12,fontFamily:'IBM Plex Mono',fontWeight:700,color:color||'var(--ink)',marginTop:2,whiteSpace:'nowrap'}}>{val}</div>
+          </div>;
+          return <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(110px,1fr))',gap:6,marginBottom:10}}>
+            {cell(`총 계약전력 (${powerPoints.length}개 거점)`,`${totalKW}kW`)}
+            {cell('법정비용 합계',fWon(legal))}
+            {cell('한전불입금 합계',kep>0?fWon(kep):'없음',kep>0?'var(--org)':'var(--ink3)')}
+            {cell('총 합계',fWon(legal+kep),'var(--acc)')}
+          </div>;
+        })()}
 
         {/* 건물유형 + 보조금 (기존 유지) */}
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,borderTop:'1px solid var(--bd)',paddingTop:8}}>
