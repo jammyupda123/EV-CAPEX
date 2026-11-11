@@ -505,6 +505,7 @@ const CHARGER_MODELS={
   3.5:['HEV','Costel','기타'],
 };
 const CHARGER_KW=[100,50,7,3.5];
+const cmKey=kw=>'k'+String(kw).replace('.','_'); // 사용자 추가 기종 저장 키 (Firestore 키에 '.' 방지)
 const REGIONS=['서울','인천광역시','경기도','충청북도','충청남도','강원도','경상북도','경상남도','전라북도','전라남도','제주도'];
 const REGION_COLORS={'서울':'#B91C1C','인천광역시':'#7C3AED','경기도':'#1D4ED8','충청북도':'#0891B2','충청남도':'#0D9488','강원도':'#15803D','경상북도':'#B45309','경상남도':'#D97706','전라북도':'#9333EA','전라남도':'#C026D3','제주도':'#E11D48'};
 const LS_KEY='ev_construction_mgr';
@@ -559,6 +560,15 @@ const fW = v => {
 const fWon = v => { if(!v&&v!==0)return'-'; return Math.round(Math.abs(v)).toLocaleString()+'원'; };
 function mergePowerPoints(pts){ return (pts||[]).reduce((s,p)=>s+(parseFloat(p.contractKW)||0),0); }
 
+const STAND_TYPES=['스탠드폴','헬멧','스탠드폴+헬멧','캐노피'];
+// 설치물 목록: 새 데이터(standItems)가 있으면 그것을, 없으면 예전 필드(스탠드폴/캐노피)에서 변환
+function getStandItems(cd){
+  if(cd.standItems!=null) return cd.standItems;
+  const out=[];
+  if((cd.standQty||0)>0||(cd.standUnitPrice||0)>0) out.push({id:1,type:'스탠드폴',qty:cd.standQty||0,unitPrice:cd.standUnitPrice||0});
+  if((cd.canopyQty||0)>0||(cd.canopyUnitPrice||0)>0) out.push({id:2,type:'캐노피',qty:cd.canopyQty||0,unitPrice:cd.canopyUnitPrice||0});
+  return out;
+}
 function calcCostTotals(cd) {
   const pts = cd.powerPoints && cd.powerPoints.length>0 ? cd.powerPoints : null;
   const kw = pts ? mergePowerPoints(pts) : (parseFloat(cd.contractKW)||0);
@@ -567,8 +577,10 @@ function calcCostTotals(cd) {
   const kepcoEx_pts = pts ? pts.reduce((s,p)=>s+calcKepco(parseFloat(p.contractKW)||0,p.powerSupplyType||'신규수전(지중)'),0) : 0;
   const totalChargers=(cd.chargerItems||[]).reduce((s,i)=>s+(i.qty||0),0);
   const chargerExVAT=(cd.chargerItems||[]).reduce((s,i)=>s+(i.qty||0)*(i.unitPrice||0),0);
-  const standExVAT=(cd.standQty||0)*(cd.standUnitPrice||0);
-  const canopyExVAT=(cd.canopyQty||0)*(cd.canopyUnitPrice||0);
+  const standItemsArr=getStandItems(cd);
+  const itemEx=i=>(parseFloat(i.qty)||0)*(parseFloat(i.unitPrice)||0);
+  const standExVAT=standItemsArr.reduce((t,i)=>t+itemEx(i),0); // 스탠드폴·헬멧·캐노피 전부 합산
+  const canopyExVAT=0; // 캐노피는 설치물 목록에 통합됨
   const elecExVAT=(cd.elecItems||[]).reduce((s,i)=>s+(parseFloat(i.qty)||0)*(parseFloat(i.unitPrice)||0),0);
   const inspEx      = cd.includeInsp   ? (pts ? inspEx_pts   : calcInsp(kw)) : 0;
   const safetyEx    = cd.includeSafety ? (pts ? safetyEx_pts : calcSafety(kw,cd.buildingType)) : 0;
@@ -589,8 +601,6 @@ function calcCostTotals(cd) {
   const totalCVT=Math.round(totalCEx*.1);
   const totalCIn=totalCEx+totalCVT;
   const so=cd.subsidyOverrides||{};
-  const standTotalQty=cd.standQty||0;
-  const canopyTotalQty=cd.canopyQty||0;
   const ciSubs=(cd.chargerItems||[]).map((item,idx)=>{
     const q=item.qty||0;const sq=so['ci_'+idx]!=null?Math.min(so['ci_'+idx],q):q;
     return {base:(item.unitPrice||0)*sq, qty:sq};
@@ -600,10 +610,13 @@ function calcCostTotals(cd) {
     return {base:Math.round((parseFloat(item.unitPrice)||0)*sq), qty:sq};
   });
   const subChargerBase=ciSubs.reduce((s,c)=>s+c.base,0);
-  const subSQ=so.stand!=null?Math.min(so.stand,standTotalQty):standTotalQty;
-  const subNQ=so.canopy!=null?Math.min(so.canopy,canopyTotalQty):canopyTotalQty;
-  const subStandBase=standTotalQty>0?Math.round(standExVAT*subSQ/standTotalQty):0;
-  const subCanopyBase=canopyTotalQty>0?Math.round(canopyExVAT*subNQ/canopyTotalQty):0;
+  const stSubs=standItemsArr.map(i=>{
+    const q=parseFloat(i.qty)||0; const ov=so['st_'+i.id]; const sq=ov!=null?Math.min(ov,q):q;
+    const unit=parseFloat(i.unitPrice)||0;
+    return {id:i.id,type:i.type||'스탠드폴',qty:q,sq,unit,ex:itemEx(i),base:Math.round(unit*sq)};
+  });
+  const subStandBase=stSubs.reduce((t,x)=>t+x.base,0);
+  const subCanopyBase=0;
   const subElecBase=eiSubs.reduce((s,e)=>s+e.base,0);
   const kepcoSubs=pts?pts.map(p=>{
     const amt=calcKepco(parseFloat(p.contractKW)||0,p.powerSupplyType||'신규수전(지중)');
@@ -625,7 +638,7 @@ function calcCostTotals(cd) {
   const subsidyC=subsidyAmt;
   const netCWon=totalCIn+inspectionInc+insuranceInc+(parseFloat(cd.elecMgrFee)||0)*inspCnt-subsidyC;
   return {
-    chargerExVAT,standExVAT,canopyExVAT,elecExVAT,legalEx,legalCostEx,
+    chargerExVAT,standExVAT,canopyExVAT,elecExVAT,legalEx,legalCostEx,standSubDetails:stSubs,
     inspEx,safetyEx,kepcoEx,supervEx,elecMgrEx,inspectionEx,insuranceEx,
     inspectionInc,insuranceInc,totalChargers,subsidyQty,inspCnt,
     totalBEx,totalBVT,totalBIn,totalCEx,totalCVT,totalCIn,
@@ -729,12 +742,15 @@ function NumInput({value, onChange, placeholder, style, className}){
   />;
 }
 
-function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
-  const [ppCollapsed,setPpCollapsed]=useState({});
+function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth,customModels={},setCustomModels}){
   const [ppEditId,setPpEditId]=useState(null);
   const [ppDraft,setPpDraft]=useState('');
   const [focusLocId,setFocusLocId]=useState(null);
   const ppCancel=useRef(false);
+  const [addModelId,setAddModelId]=useState(null);
+  const [addModelDraft,setAddModelDraft]=useState('');
+  const modelCancel=useRef(false);
+  const [delModelOpen,setDelModelOpen]=useState(null);
   const set=(k,v)=>updCost({[k]:v});
   const kw=parseFloat(cd.contractKW)||0;
   // Which case is currently active in sim tab
@@ -810,6 +826,10 @@ function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
 
 
 
+  const standItems=getStandItems(cd);
+  const addStandItem=()=>{const id=standItems.length===0?300:Math.max(...standItems.map(i=>i.id||0))+1;updCost({standItems:[...standItems,{id,type:'스탠드폴',qty:0,unitPrice:0}]});};
+  const updStandItem=(id,patch)=>updCost({standItems:standItems.map(i=>i.id===id?{...i,...patch}:i)});
+  const delStandItem=(id)=>updCost({standItems:standItems.filter(i=>i.id!==id)});
   const PP_COLORS=['#378ADD','#7F77DD','#1D9E75','#D85A30','#D4537E','#BA7517'];
   const PP_TYPES=[{v:'모자분리',a:'모자분리',b:''},{v:'신규수전(지중)',a:'신규수전',b:'(지중)'},{v:'신규수전(가공)',a:'신규수전',b:'(가공)'}];
   const ppFees=(pp)=>{
@@ -850,7 +870,7 @@ function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
             const f=ppFees(pp);
             const ppKW=f.k;
             const type=pp.powerSupplyType||'신규수전(지중)';
-            const collapsed=!!ppCollapsed[pp.id];
+            const collapsed=!!pp.collapsed;
             const locs=pp.installLocations||[];
             const pay=f.kepco>0;
             const name=pp.label||`거점 ${pi+1}`;
@@ -860,7 +880,7 @@ function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
             const pill={fontSize:10,padding:'1px 7px',borderRadius:10,background:'var(--s3)',color:'var(--ink2)',whiteSpace:'nowrap'};
             return <div key={pp.id} style={{background:'var(--s2)',border:'1px solid var(--bd)',borderLeft:`6px solid ${barColor}`,borderRadius:7,overflow:'hidden'}}>
               {/* 헤더 */}
-              <div onClick={()=>setPpCollapsed(c=>({...c,[pp.id]:!c[pp.id]}))}
+              <div onClick={()=>updPP(pp.id,{collapsed:!pp.collapsed})}
                 style={{display:'flex',alignItems:'center',gap:7,padding:'8px 12px',cursor:'pointer',borderBottom:collapsed?'none':'1px solid var(--bd)',flexWrap:'wrap'}}>
                 <span style={{fontSize:10,fontWeight:700,color:barColor,fontFamily:'IBM Plex Mono',flexShrink:0}}>#{pi+1}</span>
                 {ppEditId===pp.id
@@ -1037,17 +1057,42 @@ function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
           ))}
         </div>
         {(cd.chargerItems||[]).map(item=>{
-          const models=CHARGER_MODELS[item.kw]||['기타'];
+          const baseModels=CHARGER_MODELS[item.kw]||['기타'];
+          const extraModels=(customModels[cmKey(item.kw)]||[]).filter(m=>!baseModels.includes(m));
+          let models=[...baseModels,...extraModels];
+          if(item.model&&!models.includes(item.model)) models=[...models,item.model];
+          const commitModel=()=>{
+            if(modelCancel.current){modelCancel.current=false;setAddModelId(null);return;}
+            const name=addModelDraft.trim();
+            if(!name){setAddModelId(null);return;}
+            if(setCustomModels&&!models.includes(name)){
+              setCustomModels(prev=>{const k=cmKey(item.kw);const cur=prev[k]||[];return cur.includes(name)?prev:{...prev,[k]:[...cur,name]};});
+            }
+            updChargerItem(item.id,{model:name});
+            setAddModelId(null);
+          };
           const sub=(item.qty||0)*(item.unitPrice||0);
           return <div key={item.id} style={{display:'grid',gridTemplateColumns:'58px 100px 52px 46px 108px 96px 22px',gap:4,padding:'3px 0',borderBottom:'1px solid var(--bd)',alignItems:'center'}}>
             <select className="fsel" style={{fontSize:11,padding:'4px 4px'}} value={item.kw}
               onChange={e=>{const nkw=parseFloat(e.target.value);updChargerItem(item.id,{kw:nkw,model:CHARGER_MODELS[nkw]?.[0]||'기타'});}}>
               {CHARGER_KW.map(k=><option key={k} value={k}>{k}kW</option>)}
             </select>
-            <select className="fsel" style={{fontSize:10,padding:'4px 3px'}} value={item.model}
-              onChange={e=>updChargerItem(item.id,{model:e.target.value})}>
-              {models.map(m=><option key={m}>{m}</option>)}
-            </select>
+            {addModelId===item.id
+              ? <input autoFocus className="finput" placeholder="모델명 입력 (Enter)" value={addModelDraft}
+                  onChange={e=>setAddModelDraft(e.target.value)}
+                  onKeyDown={e=>{if(e.key==='Enter'){e.target.blur();}else if(e.key==='Escape'){modelCancel.current=true;e.target.blur();}}}
+                  onBlur={commitModel}
+                  style={{fontSize:10,padding:'4px 5px',borderColor:'var(--acc)',background:'#fff'}}/>
+              : <select className="fsel" style={{fontSize:10,padding:'4px 3px'}} value={item.model}
+                  onChange={e=>{
+                    if(e.target.value==='__add__'){modelCancel.current=false;setAddModelDraft('');setAddModelId(item.id);}
+                    else if(e.target.value==='__del__'){setDelModelOpen(item.id);}
+                    else updChargerItem(item.id,{model:e.target.value});
+                  }}>
+                  {models.map(m=><option key={m} value={m}>{m}</option>)}
+                  <option value="__add__">＋ 기종 추가</option>
+                  {extraModels.length>0&&<option value="__del__">－ 추가한 기종 삭제</option>}
+                </select>}
             <select className="fsel" style={{fontSize:11,padding:'4px 3px'}} value={item.location}
               onChange={e=>updChargerItem(item.id,{location:e.target.value})}>
               {['옥내','옥외'].map(l=><option key={l}>{l}</option>)}
@@ -1058,6 +1103,23 @@ function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
               onChange={v=>updChargerItem(item.id,{unitPrice:v})}/>
             <div className="cir-val" style={{fontSize:10}}>{sub>0?fWon(sub):'—'}</div>
             <button className="btn-ico" style={{padding:'2px 4px',fontSize:10}} onClick={()=>delChargerItem(item.id)}>✕</button>
+            {delModelOpen===item.id&&<div style={{gridColumn:'1/-1',background:'var(--s2)',border:'1px solid var(--bd)',borderRadius:5,padding:'6px 8px',margin:'2px 0 3px'}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
+                <span style={{fontSize:10,fontWeight:700,color:'var(--ink2)'}}>추가한 기종 삭제 ({item.kw}kW)</span>
+                <button className="btn-s" style={{fontSize:10,padding:'2px 8px'}} onClick={()=>setDelModelOpen(null)}>닫기</button>
+              </div>
+              {extraModels.length===0
+                ? <div style={{fontSize:10,color:'var(--ink3)'}}>삭제할 기종이 없습니다.</div>
+                : <div style={{display:'flex',flexWrap:'wrap',gap:5}}>
+                    {extraModels.map(m=>(
+                      <span key={m} style={{display:'inline-flex',alignItems:'center',gap:5,fontSize:11,padding:'2px 4px 2px 8px',border:'1px solid var(--bd)',borderRadius:12,background:'#fff'}}>
+                        {m}
+                        <button title="삭제" onClick={()=>setCustomModels&&setCustomModels(prev=>{const k=cmKey(item.kw);return {...prev,[k]:(prev[k]||[]).filter(x=>x!==m)};})}
+                          style={{border:'none',background:'var(--redd)',color:'var(--red)',borderRadius:'50%',width:16,height:16,cursor:'pointer',fontSize:11,lineHeight:1,fontFamily:'inherit'}}>×</button>
+                      </span>
+                    ))}
+                  </div>}
+            </div>}
           </div>;
         })}
           </div>
@@ -1069,24 +1131,35 @@ function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
       </div>
 
       <div className="card">
-        <div className="card-title">🪵 스탠드폴 & 캐노피 (원, 부가세별도)</div>
-        <div className="cost-pair-grid" style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+        <div className="card-title">🪵 스탠드폴 · 헬멧 · 캐노피 (원, 부가세별도)</div>
+        <div className="cost-table-scroll">
           <div>
-            <div className="flbl" style={{marginBottom:5}}>🪵 스탠드폴</div>
-            <div className="fgrid">
-              <div className="fg"><div className="flbl">수량</div><input className="finput" type="number" value={cd.standQty||''} placeholder="0" onChange={e=>set('standQty',+e.target.value)}/></div>
-              <div className="fg"><div className="flbl">단가 (원)</div><NumInput value={cd.standUnitPrice||0} onChange={v=>set('standUnitPrice',v)}/></div>
+            <div style={{display:'grid',gridTemplateColumns:'130px 52px 108px 96px 22px',gap:4,padding:'3px 0',borderBottom:'2px solid var(--bd)',marginBottom:3}}>
+              {['종류','수량','단가(원)','공급가액',''].map(h=>(
+                <div key={h} style={{fontSize:10,fontWeight:700,color:'var(--ink3)',display:'flex',alignItems:'center'}}>{h}</div>
+              ))}
             </div>
-            {ct.standExVAT>0&&<VatBreak ex={ct.standExVAT}/>}
+            {standItems.length===0&&<div style={{fontSize:10,color:'var(--ink3)',padding:'6px 0'}}>항목이 없습니다. 아래 + 항목 추가를 눌러 선택하세요.</div>}
+            {standItems.map(item=>{
+              const sub=(parseFloat(item.qty)||0)*(parseFloat(item.unitPrice)||0);
+              return <div key={item.id} style={{display:'grid',gridTemplateColumns:'130px 52px 108px 96px 22px',gap:4,padding:'3px 0',borderBottom:'1px solid var(--bd)',alignItems:'center'}}>
+                <select className="fsel" style={{fontSize:11,padding:'4px 4px'}} value={item.type||'스탠드폴'}
+                  onChange={e=>updStandItem(item.id,{type:e.target.value})}>
+                  {STAND_TYPES.map(t=><option key={t} value={t}>{t}</option>)}
+                </select>
+                <input className="finput" type="number" style={{fontSize:11,padding:'4px 4px'}} value={item.qty||''} placeholder="0"
+                  onChange={e=>updStandItem(item.id,{qty:+e.target.value})}/>
+                <NumInput style={{fontSize:11,padding:'4px 4px'}} value={parseFloat(item.unitPrice)||0}
+                  onChange={v=>updStandItem(item.id,{unitPrice:v})}/>
+                <div className="cir-val" style={{fontSize:10}}>{sub>0?fWon(sub):'—'}</div>
+                <button className="btn-ico" style={{padding:'2px 4px',fontSize:10}} onClick={()=>delStandItem(item.id)}>✕</button>
+              </div>;
+            })}
           </div>
-          <div>
-            <div className="flbl" style={{marginBottom:5}}>⛺ 캐노피 (Case C)</div>
-            <div className="fgrid">
-              <div className="fg"><div className="flbl">수량</div><input className="finput" type="number" value={cd.canopyQty||''} placeholder="0" onChange={e=>set('canopyQty',+e.target.value)}/></div>
-              <div className="fg"><div className="flbl">단가 (원)</div><NumInput value={cd.canopyUnitPrice||0} onChange={v=>set('canopyUnitPrice',v)}/></div>
-            </div>
-            {ct.canopyExVAT>0&&<VatBreak ex={ct.canopyExVAT}/>}
-          </div>
+        </div>
+        <div style={{marginTop:6,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+          <button className="btn-s" style={{fontSize:10}} onClick={addStandItem}>+ 항목 추가</button>
+          {ct.standExVAT>0&&<VatBreak ex={ct.standExVAT} label="소계"/>}
         </div>
       </div>
 
@@ -1274,8 +1347,6 @@ function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
           const so=cd.subsidyOverrides||{};
           const items=cd.chargerItems||[];
           const elecItems=cd.elecItems||[];
-          const standMeta=(cd.standQty||0)>0?`${cd.standQty}개 · ${fWon(cd.standUnitPrice||0)}`:'';
-          const canopyMeta=(cd.canopyQty||0)>0?`${cd.canopyQty}개 · ${fWon(cd.canopyUnitPrice||0)}`:'';
 
           const SubQtyInput=({ok,tq})=>{
             const cur=so[ok]!=null?so[ok]:tq;
@@ -1325,11 +1396,34 @@ function CostTab({site,cd,sm,updCost,detailWidth=100,setDetailWidth}){
           </>:<SimpleRow l="충전기" ex={ct.chargerExVAT} sub={ct.subsidyChargerEx}
               meta={ct.totalChargers>0?`${ct.totalChargers}기 · ${fWon((items[0]||{}).unitPrice||0)}`:''} ok="ci_0" tq={ct.totalChargers}/>}
 
-          {/* ── 스탠드폴 ── */}
-          <SimpleRow l="스탠드폴" ex={ct.standExVAT} sub={ct.subsidyStandEx} meta={standMeta} ok="stand" tq={cd.standQty||0}/>
-
-          {/* ── 캐노피 (Case C) ── */}
-          {activeCaseType==='C'&&<SimpleRow l="캐노피" ex={ct.canopyExVAT} sub={ct.subsidyCanopyEx} meta={canopyMeta} ok="canopy" tq={cd.canopyQty||0}/>}
+          {/* ── 스탠드폴 · 헬멧 · 캐노피 (선택한 종류가 항목명으로 표시) ── */}
+          {(()=>{
+            const sd=(ct.standSubDetails||[]).filter(x=>x.qty>0||x.ex>0);
+            if(sd.length===0) return null;
+            if(sd.length===1){
+              const x=sd[0];
+              return <SimpleRow l={x.type} ex={x.ex} sub={Math.round(x.base/2)} meta={x.qty>0?`${x.qty}개 · ${fWon(x.unit)}`:''} ok={'st_'+x.id} tq={x.qty}/>;
+            }
+            return <>
+              <div style={{display:'grid',gridTemplateColumns:cols,gap:4,borderBottom:'1px solid var(--bd)',background:'var(--s2)',margin:'0 -4px',padding:'4px 4px'}}>
+                <span style={{fontSize:11,fontWeight:600,color:'var(--ink)'}}>설치물 <span style={{fontSize:10,color:'var(--ink3)',fontFamily:'IBM Plex Mono',fontWeight:400,marginLeft:4}}>합계 {fWon(ct.standExVAT)}</span></span>
+                <span/>{showSub&&<span/>}{showSub&&<span style={{fontSize:10,fontFamily:'IBM Plex Mono',textAlign:'right',fontWeight:600,color:'var(--grn)'}}>{ct.subsidyStandEx>0?fWon(ct.subsidyStandEx):'—'}</span>}
+              </div>
+              {sd.map((x,idx)=>{
+                const isLast=idx===sd.length-1;
+                return <div key={'st'+x.id} style={{display:'grid',gridTemplateColumns:cols,gap:4,padding:'4px 0',borderBottom:'1px solid var(--bd)',alignItems:'center'}}>
+                  <span style={{fontSize:10,color:'var(--ink3)',paddingLeft:12,display:'flex',alignItems:'center',gap:4}}>
+                    <span style={{fontSize:10,color:'var(--bd)',fontFamily:'IBM Plex Mono'}}>{isLast?'└':'├'}</span>
+                    <span>{x.type}</span>
+                    {x.qty>0&&<span style={{fontSize:10,color:'var(--ink3)',fontFamily:'IBM Plex Mono'}}>{x.qty}개 · {fWon(x.unit)}</span>}
+                  </span>
+                  <span style={{fontSize:10,fontFamily:'IBM Plex Mono',textAlign:'right',color:'var(--ink3)'}}>{fWon(x.ex)}</span>
+                  {showSub&&<SubQtyInput ok={'st_'+x.id} tq={x.qty}/>}
+                  {showSub&&<span style={{fontSize:10,fontFamily:'IBM Plex Mono',textAlign:'right',fontWeight:600,color:'var(--grn)'}}>{Math.round(x.base/2)>0?fWon(Math.round(x.base/2)):'—'}</span>}
+                </div>;
+              })}
+            </>;
+          })()}
 
           {/* ── 전기공사비 ── */}
           {multiElec?<>
@@ -1699,6 +1793,7 @@ function App(){
   const [dragOverId,setDragOverId]=useState(null);
   const [statusFilter,setStatusFilter]=useState('전체');
   const [rowSize,setRowSize]=useState(1);
+  const [customModels,setCustomModels]=useState({});
   const updateSite = (patch) => setSites(ss=>ss.map(s=>s.id===sid?{...s,...patch}:s));
   const toggleCompleted = (id) => setSites(ss=>ss.map(s=>s.id===id?{...s,completed:!s.completed}:s));
 
@@ -1711,6 +1806,7 @@ function App(){
       if(saved.nid) setNid(saved.nid);
       if(saved.costMap) setCostMap(saved.costMap);
       if(saved.rowSize!=null) setRowSize(saved.rowSize);
+      if(saved.customModels) setCustomModels(saved.customModels);
     }
     setDataLoaded(true);
   };
@@ -1719,9 +1815,9 @@ function App(){
   // Auto-save
   useEffect(()=>{
     if(!dataLoaded) return;
-    const t=setTimeout(()=>saveLS({sites,sid,nid,costMap,rowSize}),800);
+    const t=setTimeout(()=>saveLS({sites,sid,nid,costMap,rowSize,customModels}),800);
     return ()=>clearTimeout(t);
-  },[sites,sid,nid,costMap,dataLoaded]);
+  },[sites,sid,nid,costMap,rowSize,customModels,dataLoaded]);
 
   // Firestore real-time sync — 다른 기기에서의 변경 실시간 반영
   useEffect(()=>{
@@ -1735,6 +1831,7 @@ function App(){
         if(data.nid!=null)setNid(data.nid);
         if(data.costMap)setCostMap(data.costMap);
         if(data.rowSize!=null)setRowSize(data.rowSize);
+        if(data.customModels)setCustomModels(data.customModels);
       }
     });
     return ()=>unsub();
@@ -1808,9 +1905,9 @@ function App(){
       </div>
       <div style={{display:'flex',alignItems:'center',gap:5}}>
         <SaveStatus/>
-        <button onClick={()=>exportData({sites,sid,nid,costMap})}
+        <button onClick={()=>exportData({sites,sid,nid,costMap,rowSize,customModels})}
           style={{background:'none',border:'1px solid rgba(255,255,255,.25)',borderRadius:4,padding:'3px 9px',fontSize:10,color:'rgba(255,255,255,.75)',cursor:'pointer',fontFamily:'inherit',fontWeight:600}}>⬇ 백업</button>
-        <button onClick={()=>importData(data=>{ setSites(data.sites); setSid(data.sid||data.sites[0]?.id||1); setNid(data.nid||100); setCostMap(data.costMap); })}
+        <button onClick={()=>importData(data=>{ setSites(data.sites); setSid(data.sid||data.sites[0]?.id||1); setNid(data.nid||100); setCostMap(data.costMap); setCustomModels(data.customModels||{}); })}
           style={{background:'rgba(255,255,255,.12)',border:'1px solid rgba(255,255,255,.25)',borderRadius:4,padding:'3px 9px',fontSize:10,color:'rgba(255,255,255,.9)',cursor:'pointer',fontFamily:'inherit',fontWeight:600}}>⬆ 복원</button>
         <button onClick={doMigrate}
           style={{background:'rgba(245,158,11,.2)',border:'1px solid rgba(245,158,11,.5)',borderRadius:4,padding:'3px 9px',fontSize:10,color:'rgba(245,158,11,.9)',cursor:'pointer',fontFamily:'inherit',fontWeight:600}}>📥 기존 데이터 이관</button>
@@ -1967,7 +2064,7 @@ function App(){
 
         {/* CostTab directly rendered */}
         <div className="content" style={{padding:12}}>
-          <CostTab site={site} cd={cd} sm={{}} updCost={updCost} detailWidth={costWidth} setDetailWidth={setCostWidth}/>
+          <CostTab site={site} cd={cd} sm={{}} updCost={updCost} detailWidth={costWidth} setDetailWidth={setCostWidth} customModels={customModels} setCustomModels={setCustomModels}/>
         </div>
       </main>
     </div>
